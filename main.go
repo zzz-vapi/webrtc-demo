@@ -77,6 +77,23 @@ func (s *WebRTCServer) createPeerConnection() (*webrtc.PeerConnection, error) {
 		return nil, err
 	}
 
+	// Create audio track with v4 codec parameters
+	audioTrack, err := webrtc.NewTrackLocalStaticSample(
+		webrtc.RTPCodecCapability{
+			MimeType:    "audio/opus", // Use string constant for v4
+			ClockRate:   48000,
+			Channels:    2,
+			SDPFmtpLine: "minptime=10;useinbandfec=1",
+		},
+		"audio",
+		"pion",
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	s.audioTrack = audioTrack
+
 	return peerConnection, nil
 }
 
@@ -158,6 +175,56 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
+	// OnTrack handler
+	s.peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		log.Printf("New track received: %s, kind: %s, codec: %s", track.ID(), track.Kind(), track.Codec().MimeType)
+
+		// Only process audio tracks
+		if track.Kind() != webrtc.RTPCodecTypeAudio {
+			return
+		}
+
+		buf := make([]byte, 1500)
+		for {
+			n, _, err := track.Read(buf)
+			if err != nil {
+				log.Printf("Error reading track: %v", err)
+				return
+			}
+
+			s.mu.Lock()
+			shouldProcess := s.isSpeaking && s.trackActive
+			s.mu.Unlock()
+
+			if shouldProcess {
+				packet := make([]byte, n)
+				copy(packet, buf[:n])
+
+				rtpPacket := &rtp.Packet{}
+				if err := rtpPacket.Unmarshal(packet); err != nil {
+					log.Printf("Error unmarshaling RTP packet: %v", err)
+					continue
+				}
+
+				s.mu.Lock()
+				s.audioBuffer = append(s.audioBuffer, packet)
+				log.Printf("Buffered audio packet: seq=%d, ts=%d, size=%d bytes",
+					rtpPacket.SequenceNumber, rtpPacket.Timestamp, len(packet))
+				s.mu.Unlock()
+			}
+
+			select {
+			case <-s.stopTrack:
+				log.Printf("Stopping track processing")
+				s.mu.Lock()
+				s.trackActive = false
+				s.mu.Unlock()
+				continue
+			default:
+			}
+		}
+	})
+
 	// Add data channel handling
 	s.peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
 		log.Printf("New DataChannel %s %d", d.Label(), d.ID())
@@ -196,63 +263,50 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 
 					case "end_speak":
 						s.mu.Lock()
+						bufferSize := len(s.audioBuffer)
+						log.Printf("Ending speak with %d buffered packets", bufferSize)
 						s.isSpeaking = false
 						s.trackActive = false
-						s.mu.Unlock()
-
-						// Safely close the stop channel
-						s.stopTrackMu.Lock()
-						if s.stopTrack != nil {
-							select {
-							case <-s.stopTrack:
-								// Channel already closed
-							default:
-								close(s.stopTrack)
-							}
-						}
-						s.stopTrackMu.Unlock()
-
-						// Make a copy of the buffer before clearing it
-						s.mu.Lock()
 						bufferCopy := make([][]byte, len(s.audioBuffer))
 						copy(bufferCopy, s.audioBuffer)
 						s.audioBuffer = make([][]byte, 0)
 						s.mu.Unlock()
 
+						s.stopTrackMu.Lock()
+						close(s.stopTrack)
+						s.stopTrackMu.Unlock()
+
 						// Echo back all buffered audio
-						go func(buffer [][]byte) {
-							log.Printf("Starting to echo back %d audio packets", len(buffer))
+						go func(bufferCopy [][]byte) {
+							log.Printf("Starting to echo back %d audio packets", len(bufferCopy))
 
 							// Create a buffered channel for audio packets
-							audioChan := make(chan []byte, len(buffer))
+							audioChan := make(chan []byte, len(bufferCopy))
 
 							// Send all packets to the channel
-							for _, packet := range buffer {
+							for _, packet := range bufferCopy {
 								audioChan <- packet
 							}
 							close(audioChan)
 
 							// Process packets with proper timing
 							for packet := range audioChan {
-								// Parse the original RTP packet
 								rtpPacket := &rtp.Packet{}
 								if err := rtpPacket.Unmarshal(packet); err != nil {
 									log.Printf("Error unmarshaling RTP packet during playback: %v", err)
 									continue
 								}
 
-								// Write the sample with proper timing
 								if err := s.audioTrack.WriteSample(media.Sample{
 									Data:     rtpPacket.Payload,
-									Duration: time.Millisecond * 20, // Standard Opus frame duration
+									Duration: time.Millisecond * 20,
 								}); err != nil {
 									log.Printf("Error writing sample: %v", err)
 								} else {
-									log.Printf("Echoed buffered audio packet: seq=%d, ts=%d, size=%d bytes",
+									log.Printf("Echoed audio packet: seq=%d, ts=%d, size=%d bytes",
 										rtpPacket.SequenceNumber, rtpPacket.Timestamp, len(rtpPacket.Payload))
 								}
 
-								// Add a small delay between packets to maintain proper timing
 								time.Sleep(time.Millisecond * 20)
 							}
 							log.Printf("Finished echoing back audio packets")
