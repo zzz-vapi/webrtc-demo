@@ -223,16 +223,6 @@
 
           pc = new RTCPeerConnection(config);
 
-          // Add the hardcoded candidate immediately after creating the connection
-          const hardcodedCandidate = new RTCIceCandidate({
-            candidate: 'candidate:1 1 udp 2122260223 54.244.51.77 3478 typ host generation 0 network-id 1 network-cost 10',
-            sdpMid: '0',
-            sdpMLineIndex: 0
-          });
-
-          console.log("Adding hardcoded host candidate:", hardcodedCandidate);
-          await pc.addIceCandidate(hardcodedCandidate);
-
           // Set up ICE candidate handler
           pc.onicecandidate = async (event) => {
             if (event.candidate) {
