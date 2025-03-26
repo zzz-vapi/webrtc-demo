@@ -144,9 +144,8 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ICE connection state changed to: %s", state.String())
 		if state == webrtc.ICEConnectionStateFailed {
 			log.Printf("ICE Connection failed, checking connection stats...")
-			if stats, err := s.peerConnection.GetStats(); err == nil {
-				log.Printf("Connection stats: %+v", stats)
-			}
+			stats := s.peerConnection.GetStats()
+			log.Printf("Connection stats: %+v", stats)
 		}
 	})
 
