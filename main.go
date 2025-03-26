@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -48,6 +50,17 @@ type ICEServer struct {
 	URLs       string `json:"urls"`
 	Username   string `json:"username,omitempty"`
 	Credential string `json:"credential,omitempty"`
+}
+
+// Define the structure for incoming ICE candidates
+type ICECandidate struct {
+	Candidate     string `json:"candidate"`
+	SDPMid        string `json:"sdpMid"`
+	SDPMLineIndex int    `json:"sdpMLineIndex"`
+}
+
+type ICECandidateRequest struct {
+	Candidates []ICECandidate `json:"candidates"`
 }
 
 func NewWebRTCServer() *WebRTCServer {
@@ -540,44 +553,47 @@ func (s *WebRTCServer) handleAnswer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebRTCServer) handleICECandidate(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	var data ICECandidateRequest
+
+	// Log the raw request body for debugging
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Error reading request body: %v", err)
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
 		return
 	}
-
-	// Add CORS headers
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-	// Handle preflight requests
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
-	var data struct {
-		Candidates []webrtc.ICECandidateInit `json:"candidates"`
-	}
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+	log.Printf("Received ICE candidate request body: %s", string(body))
 
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		log.Printf("Error decoding ICE candidates: %v", err)
+		log.Printf("Raw request body: %s", string(body))
 		http.Error(w, "Failed to decode ICE candidates", http.StatusBadRequest)
 		return
 	}
 
+	log.Printf("Received %d ICE candidates", len(data.Candidates))
 
 	// Process received candidates
-	for _, candidate := range data.Candidates {
-		log.Printf("Processing candidate: %s", candidate.Candidate)
+	for _, candidateData := range data.Candidates {
+		sdpMLineIndex := candidateData.SDPMLineIndex
+		candidate := webrtc.ICECandidateInit{
+			Candidate:     candidateData.Candidate,
+			SDPMid:        candidateData.SDPMid,
+			SDPMLineIndex: &sdpMLineIndex,
+		}
+
+		log.Printf("Processing ICE candidate: %s", candidate.Candidate)
 		if err := s.peerConnection.AddICECandidate(candidate); err != nil {
-			log.Printf("Error adding candidate: %v", err)
+			log.Printf("Error adding ICE candidate: %v", err)
 			continue
 		}
-		log.Printf("Successfully added candidate")
+		log.Printf("Successfully added ICE candidate")
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"status": "success"})
 }
 
 func (s *WebRTCServer) getICEServers(w http.ResponseWriter, r *http.Request) {

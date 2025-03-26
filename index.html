@@ -226,61 +226,50 @@
           // Set up ICE candidate handler
           pc.onicecandidate = async (event) => {
             if (event.candidate) {
-              console.log("New ICE candidate:", event.candidate.candidate);
-              
-              // Create array with hardcoded candidate first
-              const candidates = [
-                hardcodedCandidate.toJSON(),
-                event.candidate.toJSON()
-              ];
-
-              try {
-                await fetch(`${window.location.origin}/ice-candidates`, {
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                  },
-                  body: JSON.stringify({ candidates }),
-                });
-              } catch (err) {
-                console.error("Error sending candidates:", err);
-              }
-            } else {
-              console.log("ICE candidate gathering completed");
+                console.log("New ICE candidate:", event.candidate);
+                
+                try {
+                    const response = await fetch(`${window.location.origin}/ice-candidates`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            candidates: [{
+                                candidate: event.candidate.candidate,
+                                sdpMid: event.candidate.sdpMid,
+                                sdpMLineIndex: event.candidate.sdpMLineIndex
+                            }]
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        const errorText = await response.text();
+                        console.error("Server error:", errorText);
+                        throw new Error(`Server returned ${response.status}: ${errorText}`);
+                    }
+                    console.log("Successfully sent ICE candidate");
+                } catch (err) {
+                    console.error("Error sending ICE candidate:", err);
+                    throw new Error("Failed to send ICE candidates");
+                }
             }
           };
 
-          // Log ICE connection state changes
+          // Add connection state monitoring
           pc.oniceconnectionstatechange = () => {
             console.log("ICE Connection State:", pc.iceConnectionState);
-            appendLog("ICE Connection State: " + pc.iceConnectionState);
-            if (pc.iceConnectionState === "failed") {
-              console.log("ICE connection failed - checking candidates");
-              appendLog("ICE connection failed - checking candidates");
-              // Log current candidates
-              pc.currentRemoteDescription?.sdp.split("\n").forEach((line) => {
-                if (line.startsWith("a=candidate:")) {
-                  console.log("Remote candidate:", line);
-                  appendLog("Remote candidate: " + line);
-                }
-              });
-            }
           };
 
-          // Log ICE gathering state changes
           pc.onicegatheringstatechange = () => {
             console.log("ICE Gathering State:", pc.iceGatheringState);
-            appendLog("ICE Gathering State: " + pc.iceGatheringState);
-            if (pc.iceGatheringState === "complete") {
-              console.log("ICE gathering completed - checking candidates");
-              appendLog("ICE gathering completed - checking candidates");
-              // Log current candidates
-              pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
-                if (line.startsWith("a=candidate:")) {
-                  console.log("Local candidate:", line);
-                  appendLog("Local candidate: " + line);
-                }
-              });
+            if (pc.iceGatheringState === 'complete') {
+                console.log("ICE gathering completed");
+                const sdp = pc.localDescription.sdp;
+                const candidates = sdp.split('\r\n').filter(line => line.startsWith('a=candidate:'));
+                candidates.forEach(candidate => {
+                    console.log("Final local candidate:", candidate);
+                });
             }
           };
 
