@@ -98,9 +98,17 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 
 	config := webrtc.Configuration{
 		ICEServers:         iceServers,
-		ICETransportPolicy: webrtc.ICETransportPolicyAll,
+		ICETransportPolicy: webrtc.ICETransportPolicyRelay,
 		BundlePolicy:       webrtc.BundlePolicyMaxBundle,
 		RTCPMuxPolicy:      webrtc.RTCPMuxPolicyRequire,
+		SDPSemantics:       webrtc.SDPSemanticsUnifiedPlan,
+	}
+
+	// Log ICE server configuration
+	log.Printf("ICE server configuration:")
+	for i, server := range iceServers {
+		log.Printf("Server %d: URLs=%v, Username=%s, Credential=%s",
+			i, server.URLs, server.Username, server.Credential)
 	}
 
 	// Log creating peer connection
@@ -149,13 +157,15 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 			for _, server := range iceServers {
 				for _, url := range server.URLs {
 					if strings.Contains(url, "turn") {
-						log.Printf("TURN server URL: %s, Username: %s", url, server.Username)
+						log.Printf("TURN server URL: %s, Username: %s, Credential: %s",
+							url, server.Username, server.Credential)
 						// Try to connect to TURN server to verify connectivity
-						go func(turnURL, username string) {
-							// Extract host and port from URL
-							parts := strings.Split(strings.TrimPrefix(url, "turn:"), ":")
+						go func(turnURL, username, credential string) {
+							// Extract host and port from URL, removing query parameters
+							urlWithoutQuery := strings.Split(turnURL, "?")[0]
+							parts := strings.Split(strings.TrimPrefix(urlWithoutQuery, "turn:"), ":")
 							if len(parts) != 2 {
-								log.Printf("Invalid TURN URL format: %s", url)
+								log.Printf("Invalid TURN URL format: %s", turnURL)
 								return
 							}
 							host := parts[0]
@@ -164,12 +174,12 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 							// Try to establish a TCP connection
 							conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%s", host, port), 5*time.Second)
 							if err != nil {
-								log.Printf("Failed to connect to TURN server %s: %v", url, err)
+								log.Printf("Failed to connect to TURN server %s: %v", turnURL, err)
 								return
 							}
 							conn.Close()
-							log.Printf("Successfully connected to TURN server %s", url)
-						}(url, server.Username)
+							log.Printf("Successfully connected to TURN server %s", turnURL)
+						}(url, server.Username, server.Credential.(string))
 					}
 				}
 			}
@@ -601,21 +611,31 @@ func main() {
 		accountSid, authToken)
 
 	if accountSid == "" || authToken == "" {
-		log.Printf("Warning: TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN not set, using default credentials")
-		// Set some default credentials for testing
+		log.Printf("Warning: TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN not set, using openrelay.metered.ca servers")
+		// Set default configuration using openrelay.metered.ca
 		server.twilioCredentials = &TwilioResponse{
 			ICEServers: []ICEServer{
 				{
 					URLs: "stun:stun.l.google.com:19302",
 				},
 				{
-					URLs:       "turn:global.turn.twilio.com:3478?transport=udp",
-					Username:   "test_user",
-					Credential: "test_credential",
+					URLs:       "turn:openrelay.metered.ca:80",
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
+				{
+					URLs:       "turn:openrelay.metered.ca:443",
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
+				{
+					URLs:       "turn:openrelay.metered.ca:443?transport=tcp",
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
 				},
 			},
 		}
-		log.Printf("Using test credentials for TURN servers")
+		log.Printf("Using openrelay.metered.ca TURN servers")
 	} else {
 		// Fetch credentials from Twilio
 		url := fmt.Sprintf("https://api.twilio.com/2010-04-01/Accounts/%s/Tokens.json", accountSid)
