@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -134,8 +135,19 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			log.Printf("New ICE candidate: %s", candidate.String())
-			log.Printf("ICE candidate details - Protocol: %s, Address: %s, Port: %d",
-				candidate.Protocol, candidate.Address, candidate.Port)
+			log.Printf("ICE candidate details - Protocol: %s, Address: %s, Port: %d, CandidateType: %s",
+				candidate.Protocol, candidate.Address, candidate.Port, candidate.Typ)
+
+			// Log the full candidate string
+			candidateStr := fmt.Sprintf("candidate:%s %d %s %d %s %d typ %s",
+				candidate.Foundation,
+				candidate.Component,
+				candidate.Protocol,
+				candidate.Priority,
+				candidate.Address,
+				candidate.Port,
+				candidate.Typ)
+			log.Printf("Full ICE candidate string: %s", candidateStr)
 		})
 
 		// Add negotiation needed handler
@@ -366,6 +378,14 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	sdp := s.peerConnection.LocalDescription()
 	if sdp != nil {
 		log.Printf("Final Local SDP:\n%s", sdp.SDP)
+
+		// Parse and log all candidates from SDP
+		lines := strings.Split(sdp.SDP, "\n")
+		for _, line := range lines {
+			if strings.HasPrefix(line, "a=candidate:") {
+				log.Printf("SDP ICE candidate: %s", line)
+			}
+		}
 	}
 
 	// Add any pending ICE candidates
