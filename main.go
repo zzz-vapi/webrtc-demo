@@ -553,9 +553,6 @@ func (s *WebRTCServer) handleAnswer(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *WebRTCServer) handleICECandidate(w http.ResponseWriter, r *http.Request) {
-	var data ICECandidateRequest
-
-	// Log the raw request body for debugging
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("Error reading request body: %v", err)
@@ -565,31 +562,58 @@ func (s *WebRTCServer) handleICECandidate(w http.ResponseWriter, r *http.Request
 	r.Body = io.NopCloser(bytes.NewBuffer(body))
 	log.Printf("Received ICE candidate request body: %s", string(body))
 
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
-		log.Printf("Error decoding ICE candidates: %v", err)
-		log.Printf("Raw request body: %s", string(body))
-		http.Error(w, "Failed to decode ICE candidates", http.StatusBadRequest)
-		return
-	}
-
-	log.Printf("Received %d ICE candidates", len(data.Candidates))
-
-	// Process received candidates
-	for _, candidateData := range data.Candidates {
-		sdpMid := candidateData.SDPMid
-		sdpMLineIndex := uint16(candidateData.SDPMLineIndex)
-		candidate := webrtc.ICECandidateInit{
-			Candidate:     candidateData.Candidate,
-			SDPMid:        &sdpMid,        // SDPMid needs to be a pointer in v4
-			SDPMLineIndex: &sdpMLineIndex, // SDPMLineIndex needs to be *uint16 in v4
+	var data ICECandidateRequest
+	if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&data); err != nil {
+		// Try alternative format (array of strings)
+		var altData struct {
+			Candidates []string `json:"candidates"`
+		}
+		if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&altData); err != nil {
+			log.Printf("Error decoding ICE candidates in both formats: %v", err)
+			http.Error(w, "Failed to decode ICE candidates", http.StatusBadRequest)
+			return
 		}
 
-		log.Printf("Processing ICE candidate: %s", candidate.Candidate)
-		if err := s.peerConnection.AddICECandidate(candidate); err != nil {
-			log.Printf("Error adding ICE candidate: %v", err)
-			continue
+		// Convert string candidates to ICECandidate format
+		for _, candidateStr := range altData.Candidates {
+			// Remove "a=" prefix if present
+			candidateStr = strings.TrimPrefix(candidateStr, "a=")
+			// Remove trailing \r if present
+			candidateStr = strings.TrimSuffix(candidateStr, "\r")
+
+			sdpMid := "0"
+			sdpMLineIndex := uint16(0)
+			candidate := webrtc.ICECandidateInit{
+				Candidate:     candidateStr,
+				SDPMid:        &sdpMid,
+				SDPMLineIndex: &sdpMLineIndex,
+			}
+
+			log.Printf("Processing ICE candidate from string: %s", candidateStr)
+			if err := s.peerConnection.AddICECandidate(candidate); err != nil {
+				log.Printf("Error adding ICE candidate: %v", err)
+				continue
+			}
+			log.Printf("Successfully added ICE candidate from string")
 		}
-		log.Printf("Successfully added ICE candidate")
+	} else {
+		// Process regular format
+		for _, candidateData := range data.Candidates {
+			sdpMid := candidateData.SDPMid
+			sdpMLineIndex := uint16(candidateData.SDPMLineIndex)
+			candidate := webrtc.ICECandidateInit{
+				Candidate:     candidateData.Candidate,
+				SDPMid:        &sdpMid,
+				SDPMLineIndex: &sdpMLineIndex,
+			}
+
+			log.Printf("Processing ICE candidate: %s", candidate.Candidate)
+			if err := s.peerConnection.AddICECandidate(candidate); err != nil {
+				log.Printf("Error adding ICE candidate: %v", err)
+				continue
+			}
+			log.Printf("Successfully added ICE candidate")
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

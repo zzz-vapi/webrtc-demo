@@ -253,6 +253,8 @@
                     console.error("Error sending ICE candidate:", err);
                     throw new Error("Failed to send ICE candidates");
                 }
+            } else {
+                console.log("Finished gathering ICE candidates");
             }
           };
 
@@ -265,6 +267,7 @@
             console.log("ICE Gathering State:", pc.iceGatheringState);
             if (pc.iceGatheringState === 'complete') {
                 console.log("ICE gathering completed");
+                // Just log the candidates, don't send them again
                 const sdp = pc.localDescription.sdp;
                 const candidates = sdp.split('\r\n').filter(line => line.startsWith('a=candidate:'));
                 candidates.forEach(candidate => {
