@@ -335,6 +335,7 @@
             maxRetransmits: 3,
           });
 
+          // Set up data channel handlers BEFORE creating the offer
           dataChannel.onopen = () => {
             console.log("Data channel opened");
             appendLog("Control channel opened");
@@ -355,6 +356,60 @@
           dataChannel.onmessage = (event) => {
             console.log("Received message:", event.data);
             appendLog("Server: " + event.data);
+          };
+
+          // Set up connection state handler BEFORE creating the offer
+          pc.onconnectionstatechange = () => {
+            console.log("Connection state changed:", pc.connectionState);
+            appendLog("Connection state: " + pc.connectionState);
+            if (pc.connectionState === "failed") {
+              console.log("Connection failed - checking ICE candidates");
+              appendLog("Connection failed - checking ICE candidates");
+              // Log all current candidates
+              pc.currentRemoteDescription?.sdp.split("\n").forEach((line) => {
+                if (line.startsWith("a=candidate:")) {
+                  console.log("Remote candidate:", line);
+                  appendLog("Remote candidate: " + line);
+                }
+              });
+              pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
+                if (line.startsWith("a=candidate:")) {
+                  console.log("Local candidate:", line);
+                  appendLog("Local candidate: " + line);
+                }
+              });
+            }
+          };
+
+          // Set up ICE connection state handler BEFORE creating the offer
+          pc.oniceconnectionstatechange = () => {
+            console.log("ICE connection state changed:", pc.iceConnectionState);
+            appendLog("ICE connection state: " + pc.iceConnectionState);
+            if (pc.iceConnectionState === "failed") {
+              console.log("ICE connection failed - checking TURN server connectivity");
+              appendLog("ICE connection failed - checking TURN server connectivity");
+              // Log current ICE gathering state
+              console.log("Current ICE gathering state:", pc.iceGatheringState);
+              appendLog("Current ICE gathering state: " + pc.iceGatheringState);
+              // Log current signaling state
+              console.log("Current signaling state:", pc.signalingState);
+              appendLog("Current signaling state: " + pc.signalingState);
+            }
+          };
+
+          // Set up ICE gathering state handler BEFORE creating the offer
+          pc.onicegatheringstatechange = () => {
+            console.log("ICE gathering state changed:", pc.iceGatheringState);
+            appendLog("ICE gathering state: " + pc.iceGatheringState);
+            if (pc.iceGatheringState === "complete") {
+              // Log all gathered candidates
+              pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
+                if (line.startsWith("a=candidate:")) {
+                  console.log("Local candidate:", line);
+                  appendLog("Local candidate: " + line);
+                }
+              });
+            }
           };
 
           // Get local audio stream with selected device
@@ -392,22 +447,6 @@
             sender.track?.id
           );
 
-          // Set up audio processing
-          const audioContext = new AudioContext();
-          const source = audioContext.createMediaStreamSource(localStream);
-          const processor = audioContext.createScriptProcessor(1024, 1, 1);
-          source.connect(processor);
-          processor.connect(audioContext.destination);
-
-          processor.onaudioprocess = (e) => {
-            if (isSpeaking) {
-              const inputData = e.inputBuffer.getChannelData(0);
-              // Here you would process the audio data and send it to the server
-              // For now, we'll just log that we're processing audio
-              console.log("Processing audio data:", inputData.length);
-            }
-          };
-
           // Create and send offer
           console.log("Creating offer");
           const offer = await pc.createOffer({
@@ -436,59 +475,76 @@
             console.log("Received answer from server");
             await pc.setRemoteDescription(answer);
 
-            // Add connection state change handler
-            pc.onconnectionstatechange = () => {
-              console.log("Connection state changed:", pc.connectionState);
-              appendLog("Connection state: " + pc.connectionState);
-              if (pc.connectionState === "failed") {
-                console.log("Connection failed - checking ICE candidates");
-                appendLog("Connection failed - checking ICE candidates");
-                // Log all current candidates
-                pc.currentRemoteDescription?.sdp.split("\n").forEach((line) => {
-                  if (line.startsWith("a=candidate:")) {
-                    console.log("Remote candidate:", line);
-                    appendLog("Remote candidate: " + line);
-                  }
-                });
-                pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
-                  if (line.startsWith("a=candidate:")) {
-                    console.log("Local candidate:", line);
-                    appendLog("Local candidate: " + line);
-                  }
-                });
-              }
-            };
+            // Wait for data channel to be ready with timeout
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => {
+                reject(new Error("Timeout waiting for data channel"));
+              }, 5000); // 5 second timeout
 
-            // Add ICE connection state change handler
-            pc.oniceconnectionstatechange = () => {
-              console.log("ICE connection state changed:", pc.iceConnectionState);
-              appendLog("ICE connection state: " + pc.iceConnectionState);
-              if (pc.iceConnectionState === "failed") {
-                console.log("ICE connection failed - checking TURN server connectivity");
-                appendLog("ICE connection failed - checking TURN server connectivity");
-                // Log current ICE gathering state
-                console.log("Current ICE gathering state:", pc.iceGatheringState);
-                appendLog("Current ICE gathering state: " + pc.iceGatheringState);
-                // Log current signaling state
-                console.log("Current signaling state:", pc.signalingState);
-                appendLog("Current signaling state: " + pc.signalingState);
-              }
-            };
+              const checkChannel = () => {
+                if (dataChannel && dataChannel.readyState === "open") {
+                  clearTimeout(timeout);
+                  resolve();
+                } else {
+                  setTimeout(checkChannel, 100);
+                }
+              };
+              checkChannel();
+            });
 
-            // Add ICE gathering state change handler
-            pc.onicegatheringstatechange = () => {
-              console.log("ICE gathering state changed:", pc.iceGatheringState);
-              appendLog("ICE gathering state: " + pc.iceGatheringState);
-              if (pc.iceGatheringState === "complete") {
-                // Log all gathered candidates
-                pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
-                  if (line.startsWith("a=candidate:")) {
-                    console.log("Local candidate:", line);
-                    appendLog("Local candidate: " + line);
-                  }
-                });
+            console.log("Data channel is ready");
+            appendLog("Data channel is ready");
+
+            // Wait for ICE gathering to complete
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => {
+                reject(new Error("Timeout waiting for ICE gathering"));
+              }, 5000); // 5 second timeout
+
+              const checkGathering = () => {
+                if (pc.iceGatheringState === "complete") {
+                  clearTimeout(timeout);
+                  resolve();
+                } else {
+                  setTimeout(checkGathering, 100);
+                }
+              };
+              checkGathering();
+            });
+
+            console.log("ICE gathering completed");
+            appendLog("ICE gathering completed");
+
+            // Get all candidates from the local description
+            const candidates = [];
+            pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
+              if (line.startsWith("a=candidate:")) {
+                console.log("Final local candidate:", line);
+                appendLog("Final local candidate: " + line);
+                candidates.push(line);
               }
-            };
+            });
+
+            // Send all candidates to the server
+            try {
+              const response = await fetch("/ice-candidates", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  candidates: candidates,
+                }),
+              });
+              if (!response.ok) {
+                throw new Error("Failed to send ICE candidates");
+              }
+              console.log("All ICE candidates sent successfully");
+              appendLog("All ICE candidates sent successfully");
+            } catch (err) {
+              console.error("Error sending ICE candidates:", err);
+              appendLog("Error sending ICE candidates: " + err.message);
+            }
           } catch (err) {
             console.error("Error during offer/answer exchange:", err);
             throw err;

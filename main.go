@@ -295,6 +295,12 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 
 		d.OnOpen(func() {
 			log.Printf("Data channel opened successfully")
+			// Send a test message to verify the channel is working
+			if err := d.SendText("Data channel ready"); err != nil {
+				log.Printf("Error sending test message: %v", err)
+			} else {
+				log.Printf("Sent test message successfully")
+			}
 		})
 
 		d.OnClose(func() {
@@ -375,6 +381,55 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		d.OnError(func(err error) {
 			log.Printf("Data channel error: %v", err)
 		})
+	})
+
+	// Set up connection state handler BEFORE setting remote description
+	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		log.Printf("Connection state changed to: %s", state)
+		if state == webrtc.PeerConnectionStateFailed {
+			log.Printf("Connection failed - checking ICE candidates")
+			s.candidatesMutex.Lock()
+			log.Printf("Number of pending candidates: %d", len(s.pendingCandidates))
+			s.candidatesMutex.Unlock()
+
+			// Log current ICE connection state
+			log.Printf("Current ICE connection state: %s", peerConnection.ICEConnectionState())
+			log.Printf("Current ICE gathering state: %s", peerConnection.ICEGatheringState())
+
+			// Log connection state details
+			log.Printf("Connection state details:")
+			log.Printf("- Connection state: %s", peerConnection.ConnectionState())
+			log.Printf("- Signaling state: %s", peerConnection.SignalingState())
+			log.Printf("- ICE gathering state: %s", peerConnection.ICEGatheringState())
+			log.Printf("- ICE connection state: %s", peerConnection.ICEConnectionState())
+		}
+	})
+
+	// Set up ICE connection state handler BEFORE setting remote description
+	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		log.Printf("ICE connection state changed to: %s", state)
+		if state == webrtc.ICEConnectionStateChecking {
+			log.Printf("ICE connection checking - attempting to establish connection")
+			// Log current candidates
+			s.candidatesMutex.Lock()
+			log.Printf("Current pending candidates: %d", len(s.pendingCandidates))
+			s.candidatesMutex.Unlock()
+		} else if state == webrtc.ICEConnectionStateFailed {
+			log.Printf("ICE connection failed - checking TURN server authentication")
+			// Log current connection state
+			log.Printf("Current connection state: %s", peerConnection.ConnectionState())
+			log.Printf("Current ICE gathering state: %s", peerConnection.ICEGatheringState())
+		}
+	})
+
+	// Set up ICE gathering state handler BEFORE setting remote description
+	peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
+		log.Printf("ICE gathering state changed to: %s", state)
+		if state == webrtc.ICEGathererStateComplete {
+			// Log ICE gathering completion
+			log.Printf("ICE gathering completed with state: %s", state)
+			log.Printf("Current ICE connection state: %s", peerConnection.ICEConnectionState())
+		}
 	})
 
 	// Set the remote description
