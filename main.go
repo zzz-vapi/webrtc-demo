@@ -91,6 +91,11 @@ func (s *WebRTCServer) createPeerConnection() (*webrtc.PeerConnection, error) {
 
 	s.audioTrack = audioTrack
 
+	// Add the audio track to the peer connection
+	if _, err := peerConnection.AddTrack(s.audioTrack); err != nil {
+		return nil, err
+	}
+
 	return peerConnection, nil
 }
 
