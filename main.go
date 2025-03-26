@@ -196,6 +196,11 @@ func main() {
 	// Test STUN connectivity on startup
 	testSTUNConnectivity()
 
+	// Serve static files from the current directory
+	fs := http.FileServer(http.Dir("."))
+	http.Handle("/", fs)
+
+	// WebRTC endpoints
 	http.HandleFunc("/offer", server.handleOffer)
 	http.HandleFunc("/ice-candidates", server.handleICECandidate)
 
