@@ -464,42 +464,47 @@ func (s *WebRTCServer) handleICECandidate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var body struct {
-		Candidate webrtc.ICECandidateInit `json:"candidate"`
+	var msg struct {
+		Candidates []string `json:"candidates"`
 	}
-
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		log.Printf("Failed to decode ICE candidate: %v", err)
-		http.Error(w, "Failed to decode ICE candidate", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		log.Printf("Failed to decode ICE candidates message: %v", err)
+		http.Error(w, "Failed to decode ICE candidates", http.StatusBadRequest)
 		return
 	}
 
-	log.Printf("Received ICE candidate: %+v", body.Candidate)
+	log.Printf("Received %d ICE candidates", len(msg.Candidates))
 
-	s.candidatesMutex.Lock()
-	defer s.candidatesMutex.Unlock()
-
-	if !s.remoteDescriptionSet {
-		// Store candidate for later if remote description isn't set yet
-		s.pendingCandidates = append(s.pendingCandidates, body.Candidate)
-		log.Printf("Stored pending ICE candidate (total pending: %d)", len(s.pendingCandidates))
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
+	s.mu.Lock()
 	if s.peerConnection == nil {
-		log.Printf("Peer connection is nil, cannot add ICE candidate")
-		http.Error(w, "Peer connection not initialized", http.StatusInternalServerError)
+		s.mu.Unlock()
+		log.Printf("No peer connection available")
+		http.Error(w, "No peer connection available", http.StatusBadRequest)
 		return
 	}
 
-	if err := s.peerConnection.AddICECandidate(body.Candidate); err != nil {
-		log.Printf("Failed to add ICE candidate: %v", err)
-		http.Error(w, "Failed to add ICE candidate", http.StatusInternalServerError)
-		return
-	}
+	// Process each candidate
+	for _, candidateStr := range msg.Candidates {
+		log.Printf("Processing ICE candidate: %s", candidateStr)
 
-	log.Printf("Successfully added ICE candidate")
+		// Create ICE candidate init
+		lineIndex := uint16(0)
+		sdpMid := "0"
+		candidate := webrtc.ICECandidateInit{
+			Candidate:     candidateStr,
+			SDPMLineIndex: &lineIndex,
+			SDPMid:        &sdpMid,
+		}
+
+		// Add the candidate to the peer connection
+		if err := s.peerConnection.AddICECandidate(candidate); err != nil {
+			log.Printf("Failed to add ICE candidate: %v", err)
+			continue
+		}
+		log.Printf("Successfully added ICE candidate")
+	}
+	s.mu.Unlock()
+
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -712,7 +717,7 @@ func main() {
 	// Set up routes
 	http.HandleFunc("/ice-servers", server.getICEServers)
 	http.HandleFunc("/offer", server.handleOffer)
-	http.HandleFunc("/ice-candidate", server.handleICECandidate)
+	http.HandleFunc("/ice-candidates", server.handleICECandidate)
 
 	log.Printf("Server starting on port 8080...")
 	if err := http.ListenAndServe(":8080", nil); err != nil {

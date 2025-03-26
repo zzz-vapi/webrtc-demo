@@ -260,39 +260,56 @@
                   address: event.candidate.address,
                   port: event.candidate.port,
                   type: event.candidate.type,
+                  component: event.candidate.component,
+                  foundation: event.candidate.foundation,
+                  priority: event.candidate.priority,
+                  sdpMid: event.candidate.sdpMid,
+                  sdpMLineIndex: event.candidate.sdpMLineIndex,
                 });
 
                 // Check if it's a TURN candidate
                 if (event.candidate.type === "relay") {
-                  console.log(
-                    "Found TURN candidate:",
-                    event.candidate.candidate
-                  );
-                  appendLog(
-                    "Found TURN candidate: " + event.candidate.candidate
-                  );
+                  console.log("Found TURN candidate:", event.candidate.candidate);
+                  appendLog("Found TURN candidate: " + event.candidate.candidate);
                 }
+              } catch (err) {
+                console.error("Error logging ICE candidate:", err);
+                appendLog("Error logging ICE candidate: " + err.message);
+              }
+            } else {
+              console.log("ICE candidate gathering completed");
+              appendLog("ICE candidate gathering completed");
+              
+              // Get all candidates from the local description
+              const candidates = [];
+              pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
+                if (line.startsWith("a=candidate:")) {
+                  console.log("Final local candidate:", line);
+                  appendLog("Final local candidate: " + line);
+                  candidates.push(line);
+                }
+              });
 
-                const response = await fetch("/ice-candidate", {
+              // Send all candidates to the server
+              try {
+                const response = await fetch("/ice-candidates", {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
                   },
                   body: JSON.stringify({
-                    candidate: event.candidate.toJSON(),
+                    candidates: candidates,
                   }),
                 });
                 if (!response.ok) {
-                  throw new Error("Failed to send ICE candidate");
+                  throw new Error("Failed to send ICE candidates");
                 }
-                console.log("ICE candidate sent successfully");
+                console.log("All ICE candidates sent successfully");
+                appendLog("All ICE candidates sent successfully");
               } catch (err) {
-                console.error("Error sending ICE candidate:", err);
-                appendLog("Error sending ICE candidate: " + err.message);
+                console.error("Error sending ICE candidates:", err);
+                appendLog("Error sending ICE candidates: " + err.message);
               }
-            } else {
-              console.log("ICE candidate gathering completed");
-              appendLog("ICE candidate gathering completed");
             }
           };
 
@@ -419,19 +436,6 @@
             console.log("Received answer from server");
             await pc.setRemoteDescription(answer);
 
-            // Handle ICE candidates from server
-            pc.onicecandidate = (event) => {
-              if (event.candidate) {
-                console.log("New ICE candidate from server:", event.candidate);
-                appendLog(
-                  "New ICE candidate from server: " + event.candidate.type
-                );
-              } else {
-                console.log("ICE candidate gathering completed");
-                appendLog("ICE candidate gathering completed");
-              }
-            };
-
             // Add connection state change handler
             pc.onconnectionstatechange = () => {
               console.log("Connection state changed:", pc.connectionState);
@@ -439,23 +443,35 @@
               if (pc.connectionState === "failed") {
                 console.log("Connection failed - checking ICE candidates");
                 appendLog("Connection failed - checking ICE candidates");
+                // Log all current candidates
+                pc.currentRemoteDescription?.sdp.split("\n").forEach((line) => {
+                  if (line.startsWith("a=candidate:")) {
+                    console.log("Remote candidate:", line);
+                    appendLog("Remote candidate: " + line);
+                  }
+                });
+                pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
+                  if (line.startsWith("a=candidate:")) {
+                    console.log("Local candidate:", line);
+                    appendLog("Local candidate: " + line);
+                  }
+                });
               }
             };
 
             // Add ICE connection state change handler
             pc.oniceconnectionstatechange = () => {
-              console.log(
-                "ICE connection state changed:",
-                pc.iceConnectionState
-              );
+              console.log("ICE connection state changed:", pc.iceConnectionState);
               appendLog("ICE connection state: " + pc.iceConnectionState);
               if (pc.iceConnectionState === "failed") {
-                console.log(
-                  "ICE connection failed - checking TURN server connectivity"
-                );
-                appendLog(
-                  "ICE connection failed - checking TURN server connectivity"
-                );
+                console.log("ICE connection failed - checking TURN server connectivity");
+                appendLog("ICE connection failed - checking TURN server connectivity");
+                // Log current ICE gathering state
+                console.log("Current ICE gathering state:", pc.iceGatheringState);
+                appendLog("Current ICE gathering state: " + pc.iceGatheringState);
+                // Log current signaling state
+                console.log("Current signaling state:", pc.signalingState);
+                appendLog("Current signaling state: " + pc.signalingState);
               }
             };
 
@@ -463,6 +479,15 @@
             pc.onicegatheringstatechange = () => {
               console.log("ICE gathering state changed:", pc.iceGatheringState);
               appendLog("ICE gathering state: " + pc.iceGatheringState);
+              if (pc.iceGatheringState === "complete") {
+                // Log all gathered candidates
+                pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
+                  if (line.startsWith("a=candidate:")) {
+                    console.log("Local candidate:", line);
+                    appendLog("Local candidate: " + line);
+                  }
+                });
+              }
             };
           } catch (err) {
             console.error("Error during offer/answer exchange:", err);
