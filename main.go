@@ -60,9 +60,6 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		config := webrtc.Configuration{
 			ICEServers: []webrtc.ICEServer{
 				{
-					URLs: []string{"stun:stun.l.google.com:19302"},
-				},
-				{
 					URLs:       []string{"turn:openrelay.metered.ca:80"},
 					Username:   "openrelayproject",
 					Credential: "openrelayproject",
@@ -102,18 +99,8 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 					Username:   "openrelayproject",
 					Credential: "openrelayproject",
 				},
-				{
-					URLs:       []string{"turn:global.turn.twilio.com:3478?transport=udp"},
-					Username:   "openrelayproject",
-					Credential: "openrelayproject",
-				},
-				{
-					URLs:       []string{"turn:global.turn.twilio.com:3478?transport=tcp"},
-					Username:   "openrelayproject",
-					Credential: "openrelayproject",
-				},
 			},
-			ICETransportPolicy: webrtc.ICETransportPolicyAll,
+			ICETransportPolicy: webrtc.ICETransportPolicyRelay, // Force TURN only
 			BundlePolicy:       webrtc.BundlePolicyMaxBundle,
 			RTCPMuxPolicy:      webrtc.RTCPMuxPolicyRequire,
 		}
@@ -133,19 +120,43 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 				sdp := peerConnection.LocalDescription()
 				if sdp != nil {
 					log.Printf("Local SDP:\n%s", sdp.SDP)
-				}
 
-				// // Log connection stats
-				// stats := peerConnection.GetStats()
-				// for _, stat := range stats {
-				// 	//log.Printf(" Connection Stat: %+v", stat)
-				// }
+					// Parse and log all candidates from SDP
+					lines := strings.Split(sdp.SDP, "\n")
+					for _, line := range lines {
+						if strings.HasPrefix(line, "a=candidate:") {
+							log.Printf("SDP ICE candidate: %s", line)
+							// Check if it's a TURN candidate
+							if strings.Contains(line, "typ relay") {
+								log.Printf("Found TURN candidate: %s", line)
+							}
+						}
+					}
+				}
 			}
 		})
 
 		// Add ICE candidate gathering state change handler
 		peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
 			log.Printf("ICE Gathering State changed to: %s", state)
+			if state == webrtc.ICEGathererStateComplete {
+				log.Printf("ICE gathering completed")
+				// Log final gathering state
+				sdp := peerConnection.LocalDescription()
+				if sdp != nil {
+					lines := strings.Split(sdp.SDP, "\n")
+					turnCandidates := 0
+					for _, line := range lines {
+						if strings.HasPrefix(line, "a=candidate:") {
+							if strings.Contains(line, "typ relay") {
+								turnCandidates++
+								log.Printf("TURN candidate found: %s", line)
+							}
+						}
+					}
+					log.Printf("Total TURN candidates gathered: %d", turnCandidates)
+				}
+			}
 		})
 
 		// Add signaling state change handler
@@ -178,6 +189,11 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 				candidate.Port,
 				candidate.Typ)
 			log.Printf("Full ICE candidate string: %s", candidateStr)
+
+			// Check if it's a TURN candidate
+			if candidate.Typ == webrtc.ICECandidateTypeRelay {
+				log.Printf("Found TURN candidate: %s", candidateStr)
+			}
 		})
 
 		// Add negotiation needed handler

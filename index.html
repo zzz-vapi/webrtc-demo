@@ -188,7 +188,6 @@
           // Create peer connection
           pc = new RTCPeerConnection({
             iceServers: [
-              { urls: 'stun:stun.l.google.com:19302' },
               {
                 urls: 'turn:openrelay.metered.ca:80',
                 username: 'openrelayproject',
@@ -228,19 +227,9 @@
                 urls: 'turn:relay.metered.ca:80?transport=tcp',
                 username: 'openrelayproject',
                 credential: 'openrelayproject'
-              },
-              {
-                urls: 'turn:global.turn.twilio.com:3478?transport=udp',
-                username: 'openrelayproject',
-                credential: 'openrelayproject'
-              },
-              {
-                urls: 'turn:global.turn.twilio.com:3478?transport=tcp',
-                username: 'openrelayproject',
-                credential: 'openrelayproject'
               }
             ],
-            iceTransportPolicy: 'all',
+            iceTransportPolicy: 'relay', // Force TURN only
             bundlePolicy: 'max-bundle',
             rtcpMuxPolicy: 'require'
           });
@@ -251,17 +240,30 @@
             appendLog('ICE Connection State: ' + pc.iceConnectionState);
           };
 
-          // Log signaling state changes
-          pc.onsignalingstatechange = () => {
-            console.log('Signaling State:', pc.signalingState);
-            appendLog('Signaling State: ' + pc.signalingState);
+          // Log ICE gathering state changes
+          pc.onicegatheringstatechange = () => {
+            console.log('ICE Gathering State:', pc.iceGatheringState);
+            appendLog('ICE Gathering State: ' + pc.iceGatheringState);
           };
 
-          // Handle ICE candidates
+          // Handle ICE candidates with detailed logging
           pc.onicecandidate = async (event) => {
             if (event.candidate) {
               try {
-                console.log('Sending ICE candidate:', event.candidate);
+                console.log('New ICE candidate:', event.candidate.candidate);
+                console.log('Candidate details:', {
+                  protocol: event.candidate.protocol,
+                  address: event.candidate.address,
+                  port: event.candidate.port,
+                  type: event.candidate.type
+                });
+                
+                // Check if it's a TURN candidate
+                if (event.candidate.type === 'relay') {
+                  console.log('Found TURN candidate:', event.candidate.candidate);
+                  appendLog('Found TURN candidate: ' + event.candidate.candidate);
+                }
+
                 const response = await fetch('/ice-candidate', {
                   method: 'POST',
                   headers: {
@@ -279,6 +281,9 @@
                 console.error('Error sending ICE candidate:', err);
                 appendLog('Error sending ICE candidate: ' + err.message);
               }
+            } else {
+              console.log('ICE candidate gathering completed');
+              appendLog('ICE candidate gathering completed');
             }
           };
 
