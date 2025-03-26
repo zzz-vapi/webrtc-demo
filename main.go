@@ -61,6 +61,21 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 				{
 					URLs: []string{"stun:stun.l.google.com:19302"},
 				},
+				{
+					URLs:       []string{"turn:openrelay.metered.ca:80"},
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
+				{
+					URLs:       []string{"turn:openrelay.metered.ca:443"},
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
+				{
+					URLs:       []string{"turn:openrelay.metered.ca:443?transport=tcp"},
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
 			},
 		}
 
