@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -125,6 +126,17 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 			s.candidatesMutex.Lock()
 			log.Printf("Number of pending candidates: %d", len(s.pendingCandidates))
 			s.candidatesMutex.Unlock()
+
+			// Log current ICE connection state
+			log.Printf("Current ICE connection state: %s", peerConnection.ICEConnectionState())
+			log.Printf("Current ICE gathering state: %s", peerConnection.ICEGatheringState())
+
+			// Log connection state details
+			log.Printf("Connection state details:")
+			log.Printf("- Connection state: %s", peerConnection.ConnectionState())
+			log.Printf("- Signaling state: %s", peerConnection.SignalingState())
+			log.Printf("- ICE gathering state: %s", peerConnection.ICEGatheringState())
+			log.Printf("- ICE connection state: %s", peerConnection.ICEConnectionState())
 		}
 	})
 
@@ -138,6 +150,26 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 				for _, url := range server.URLs {
 					if strings.Contains(url, "turn") {
 						log.Printf("TURN server URL: %s, Username: %s", url, server.Username)
+						// Try to connect to TURN server to verify connectivity
+						go func(turnURL, username string) {
+							// Extract host and port from URL
+							parts := strings.Split(strings.TrimPrefix(url, "turn:"), ":")
+							if len(parts) != 2 {
+								log.Printf("Invalid TURN URL format: %s", url)
+								return
+							}
+							host := parts[0]
+							port := parts[1]
+
+							// Try to establish a TCP connection
+							conn, err := net.DialTimeout("tcp", fmt.Sprintf("%s:%s", host, port), 5*time.Second)
+							if err != nil {
+								log.Printf("Failed to connect to TURN server %s: %v", url, err)
+								return
+							}
+							conn.Close()
+							log.Printf("Successfully connected to TURN server %s", url)
+						}(url, server.Username)
 					}
 				}
 			}
@@ -150,6 +182,11 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	// Add ICE gathering state change handler
 	peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
 		log.Printf("ICE gathering state changed to: %s", state)
+		if state == webrtc.ICEGathererStateComplete {
+			// Log ICE gathering completion
+			log.Printf("ICE gathering completed with state: %s", state)
+			log.Printf("Current ICE connection state: %s", peerConnection.ICEConnectionState())
+		}
 	})
 
 	// Add detailed ICE candidate logging
@@ -159,8 +196,8 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("New ICE candidate: %s", candidate.String())
-		log.Printf("Candidate details - Protocol: %s, Address: %s, Port: %d",
-			candidate.Protocol, candidate.Address, candidate.Port)
+		log.Printf("Candidate details - Protocol: %s, Address: %s, Port: %d, Type: %s",
+			candidate.Protocol, candidate.Address, candidate.Port, candidate.Typ)
 	})
 
 	// Create audio track for echo
