@@ -82,6 +82,36 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 					Username:   "openrelayproject",
 					Credential: "openrelayproject",
 				},
+				{
+					URLs:       []string{"turn:relay.metered.ca:80"},
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
+				{
+					URLs:       []string{"turn:relay.metered.ca:443"},
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
+				{
+					URLs:       []string{"turn:relay.metered.ca:443?transport=tcp"},
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
+				{
+					URLs:       []string{"turn:relay.metered.ca:80?transport=tcp"},
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
+				{
+					URLs:       []string{"turn:global.turn.twilio.com:3478?transport=udp"},
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
+				{
+					URLs:       []string{"turn:global.turn.twilio.com:3478?transport=tcp"},
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
 			},
 			ICETransportPolicy: webrtc.ICETransportPolicyAll,
 			BundlePolicy:       webrtc.BundlePolicyMaxBundle,
@@ -105,11 +135,11 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 					log.Printf("Local SDP:\n%s", sdp.SDP)
 				}
 
-				// Log connection stats
-				stats := peerConnection.GetStats()
-				for _, stat := range stats {
-					//log.Printf(" Connection Stat: %+v", stat)
-				}
+				// // Log connection stats
+				// stats := peerConnection.GetStats()
+				// for _, stat := range stats {
+				// 	//log.Printf(" Connection Stat: %+v", stat)
+				// }
 			}
 		})
 

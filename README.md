@@ -37,8 +37,14 @@ go run main.go
 
 2. Open your web browser and navigate to:
 ```
-http://localhost:8080
+http://localhost:80
 ```
+
+3. Click the "Start Session" button to start a webrtc connection
+
+4. Click the "Start Speak" button to start recording.
+
+5. Click the "End Speak" button and it is expected to hear the recording echoing back.
 
 ## Project Structure
 
