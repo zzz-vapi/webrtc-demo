@@ -62,6 +62,13 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ensure the offer has the correct SDP type
+	if offer.Type != webrtc.SDPTypeOffer {
+		log.Printf("Invalid SDP type received: %v", offer.Type)
+		http.Error(w, "Invalid SDP type, expected 'offer'", http.StatusBadRequest)
+		return
+	}
+
 	s.mu.Lock()
 	var err error
 	s.peerConnection, err = s.createPeerConnection()
@@ -127,6 +134,15 @@ type ICECandidateRequest struct {
 }
 
 func (s *WebRTCServer) handleICECandidate(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	if s.peerConnection == nil || s.peerConnection.RemoteDescription() == nil {
+		log.Printf("Cannot process ICE candidates: peer connection not ready")
+		http.Error(w, "Peer connection not ready", http.StatusConflict)
+		s.mu.Unlock()
+		return
+	}
+	s.mu.Unlock()
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("Error reading request body: %v", err)
