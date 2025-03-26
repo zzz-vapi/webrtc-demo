@@ -1,135 +1,135 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
+<head>
     <meta charset="UTF-8" />
     <title>Local WebRTC Chat</title>
     <style>
-      body {
-        background: #222;
-        color: #f9f9f9;
-        font-family: Arial, sans-serif;
-        max-width: 800px;
-        margin: 0 auto;
-        padding: 20px;
-      }
-      #log {
-        border: 1px solid #444;
-        padding: 10px;
-        margin-top: 10px;
-        height: 300px;
-        overflow-y: auto;
-        background: #333;
-        color: #f9f9f9;
-        display: flex;
-        flex-direction: column;
-      }
-      .log-message {
-        margin-bottom: 5px;
-      }
-      #inputContainer {
-        margin-top: auto;
-        display: flex;
-        align-items: center;
-      }
-      #textInput {
-        flex: 1;
-        padding: 8px;
-        margin-right: 4px;
-        background: #444;
-        color: #f9f9f9;
-        border: 1px solid #555;
-      }
-      button {
-        padding: 8px;
-        background: #555;
-        color: #f9f9f9;
-        border: 1px solid #666;
-        cursor: pointer;
-      }
-      .audio-container {
-        margin: 10px 0;
-        padding: 8px;
-        background: #333;
-        border: 1px solid #444;
-        border-radius: 4px;
-      }
-      .volume-control {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-      #volumeSlider {
-        width: 100px;
-        accent-color: #555;
-      }
-      #muteButton {
-        padding: 4px 8px;
-        margin-right: 8px;
-        background: #444;
-        border: 1px solid #555;
-        border-radius: 4px;
-        cursor: pointer;
-      }
-      .status {
-        margin: 10px 0;
-        padding: 8px;
-        border-radius: 4px;
-        background: #444;
-      }
-      .status.connected {
-        background: #2a5;
-      }
-      .status.disconnected {
-        background: #a52;
-      }
-      .button-group {
-        display: flex;
-        gap: 10px;
-        margin: 10px 0;
-      }
-      #startButton {
-        background: #2a5;
-      }
-      #endButton {
-        background: #a52;
-        display: none;
-      }
-      #startSpeakButton {
-        background: #2a5;
-      }
-      #endSpeakButton {
-        background: #a52;
-        display: none;
-      }
-      #settingsButton {
-        background: #555;
-      }
-      .input-control {
-        margin-top: 10px;
-      }
-      #audioInput {
-        padding: 8px;
-        background: #444;
-        color: #f9f9f9;
-        border: 1px solid #555;
-      }
+        body {
+            background: #222;
+            color: #f9f9f9;
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        #log {
+            border: 1px solid #444;
+            padding: 10px;
+            margin-top: 10px;
+            height: 300px;
+            overflow-y: auto;
+            background: #333;
+            color: #f9f9f9;
+            display: flex;
+            flex-direction: column;
+        }
+        .log-message {
+            margin-bottom: 5px;
+        }
+        #inputContainer {
+            margin-top: auto;
+            display: flex;
+            align-items: center;
+        }
+        #textInput {
+            flex: 1;
+            padding: 8px;
+            margin-right: 4px;
+            background: #444;
+            color: #f9f9f9;
+            border: 1px solid #555;
+        }
+        button {
+            padding: 8px;
+            background: #555;
+            color: #f9f9f9;
+            border: 1px solid #666;
+            cursor: pointer;
+        }
+        .audio-container {
+            margin: 10px 0;
+            padding: 8px;
+            background: #333;
+            border: 1px solid #444;
+            border-radius: 4px;
+        }
+        .volume-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        #volumeSlider {
+            width: 100px;
+            accent-color: #555;
+        }
+        #muteButton {
+            padding: 4px 8px;
+            margin-right: 8px;
+            background: #444;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 8px;
+            border-radius: 4px;
+            background: #444;
+        }
+        .status.connected {
+            background: #2a5;
+        }
+        .status.disconnected {
+            background: #a52;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        #startButton {
+            background: #2a5;
+        }
+        #endButton {
+            background: #a52;
+            display: none;
+        }
+        #startSpeakButton {
+            background: #2a5;
+        }
+        #endSpeakButton {
+            background: #a52;
+            display: none;
+        }
+        #settingsButton {
+            background: #555;
+        }
+        .input-control {
+            margin-top: 10px;
+        }
+        #audioInput {
+            padding: 8px;
+            background: #444;
+            color: #f9f9f9;
+            border: 1px solid #555;
+        }
     </style>
-  </head>
-  <body>
+</head>
+<body>
     <h1>Local WebRTC Chat</h1>
     <p>Click below to start/end a session with the local WebRTC server.</p>
 
     <div id="status" class="status disconnected">Disconnected</div>
     <div class="button-group">
-      <button id="startButton">🟢 Start Session</button>
-      <button id="startSpeakButton">🎤 Start Speak</button>
+        <button id="startButton">🟢 Start Session</button>
+        <button id="startSpeakButton">🎤 Start Speak</button>
     </div>
 
     <div class="audio-container">
-      <audio id="remoteAudio" autoplay></audio>
-      <div class="volume-control">
-        <label for="volumeSlider">Remote Audio Control: </label>
-        <button id="muteButton">🔊</button>
+        <audio id="remoteAudio" autoplay></audio>
+        <div class="volume-control">
+            <label for="volumeSlider">Remote Audio Control: </label>
+            <button id="muteButton">🔊</button>
         <input
           type="range"
           id="volumeSlider"
@@ -138,22 +138,22 @@
           step="0.1"
           value="1"
         />
-      </div>
-      <div class="input-control">
-        <label for="audioInput">Microphone: </label>
-        <select id="audioInput"></select>
-      </div>
+        </div>
+        <div class="input-control">
+            <label for="audioInput">Microphone: </label>
+            <select id="audioInput"></select>
+        </div>
     </div>
 
     <div id="log">
-      <div id="inputContainer">
+        <div id="inputContainer">
         <input
           id="textInput"
           type="text"
           placeholder="Type your message here"
         />
-        <button id="sendButton">Send</button>
-      </div>
+            <button id="sendButton">Send</button>
+        </div>
     </div>
 
     <div class="warning">
@@ -162,29 +162,29 @@
     </div>
 
     <script>
-      // WebRTC globals
+        // WebRTC globals
       let pc; // RTCPeerConnection
       let track; // Local audio track
       let localStream; // Local media stream
       let isCallActive = false; // Call state
       let isSpeaking = false; // Speaking state
-      let speakDebounceTimer = null; // Debounce timer for speak button
+        let speakDebounceTimer = null; // Debounce timer for speak button
       let dataChannel; // Data channel for control messages
 
-      // DOM elements
+        // DOM elements
       const remoteAudioEl = document.getElementById("remoteAudio");
       const muteButton = document.getElementById("muteButton");
       const volumeSlider = document.getElementById("volumeSlider");
-      const logEl = document.getElementById("log");
-      const inputContainerEl = document.getElementById("inputContainer");
-      const textInputEl = document.getElementById("textInput");
-      const sendButtonEl = document.getElementById("sendButton");
-      const statusEl = document.getElementById("status");
-      const startButtonEl = document.getElementById("startButton");
-      const endButtonEl = document.getElementById("endButton");
-      const startSpeakButtonEl = document.getElementById("startSpeakButton");
-      const endSpeakButtonEl = document.getElementById("endSpeakButton");
-      const settingsButtonEl = document.getElementById("settingsButton");
+        const logEl = document.getElementById("log");
+        const inputContainerEl = document.getElementById("inputContainer");
+        const textInputEl = document.getElementById("textInput");
+        const sendButtonEl = document.getElementById("sendButton");
+        const statusEl = document.getElementById("status");
+        const startButtonEl = document.getElementById("startButton");
+        const endButtonEl = document.getElementById("endButton");
+        const startSpeakButtonEl = document.getElementById("startSpeakButton");
+        const endSpeakButtonEl = document.getElementById("endSpeakButton");
+        const settingsButtonEl = document.getElementById("settingsButton");
       const audioInputEl = document.getElementById("audioInput");
 
       // Get the base URL from the current window location
@@ -215,48 +215,45 @@
 
       async function initWebRTC() {
         try {
-          // First, get ICE servers from our server
-          console.log("Fetching ICE servers configuration");
-          const iceResponse = await fetch(`${window.location.origin}/ice-servers`);
-          if (!iceResponse.ok) {
-            throw new Error("Failed to get ICE servers");
-          }
-          const iceConfig = await iceResponse.json();
-          console.log("Received ICE servers:", iceConfig.iceServers);
+          const config = {
+            iceServers: [{
+              urls: 'stun:stun.l.google.com:19302'
+            }]
+          };
 
-          // Create peer connection with the received ICE servers
-          pc = new RTCPeerConnection({
-            iceServers: iceConfig.iceServers,
-            iceTransportPolicy: "all",
-            bundlePolicy: "max-bundle",
-            rtcpMuxPolicy: "require",
+          pc = new RTCPeerConnection(config);
+
+          // Add the hardcoded candidate immediately after creating the connection
+          const hardcodedCandidate = new RTCIceCandidate({
+            candidate: 'candidate:1 1 udp 2122260223 54.244.51.77 3478 typ host generation 0 network-id 1 network-cost 10',
+            sdpMid: '0',
+            sdpMLineIndex: 0
           });
 
-          // Log ICE server configuration
-          console.log("RTCPeerConnection created with config:", {
-            iceServers: iceConfig.iceServers,
-            iceTransportPolicy: "all"
-          });
+          console.log("Adding hardcoded host candidate:", hardcodedCandidate);
+          await pc.addIceCandidate(hardcodedCandidate);
 
           // Set up ICE candidate handler
           pc.onicecandidate = async (event) => {
             if (event.candidate) {
-              console.log("New ICE candidate:", event.candidate);
-              console.log("Candidate details:", {
-                protocol: event.candidate.protocol,
-                address: event.candidate.address,
-                port: event.candidate.port,
-                type: event.candidate.type,
-                component: event.candidate.component,
-                foundation: event.candidate.foundation,
-                priority: event.candidate.priority,
-                sdpMid: event.candidate.sdpMid,
-                sdpMLineIndex: event.candidate.sdpMLineIndex,
-              });
+              console.log("New ICE candidate:", event.candidate.candidate);
+              
+              // Create array with hardcoded candidate first
+              const candidates = [
+                hardcodedCandidate.toJSON(),
+                event.candidate.toJSON()
+              ];
 
-              // Specifically log TURN candidates
-              if (event.candidate.type === "relay") {
-                console.log("Found TURN candidate:", event.candidate.candidate);
+              try {
+                await fetch(`${window.location.origin}/ice-candidates`, {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                  },
+                  body: JSON.stringify({ candidates }),
+                });
+              } catch (err) {
+                console.error("Error sending candidates:", err);
               }
             } else {
               console.log("ICE candidate gathering completed");
@@ -365,35 +362,35 @@
             }
           };
 
-          // Get local audio stream with selected device
-          const selectedDeviceId = audioInputEl.value;
-          console.log("Selected audio device ID:", selectedDeviceId);
-
-          const constraints = {
-            audio: {
+                // Get local audio stream with selected device
+                const selectedDeviceId = audioInputEl.value;
+                console.log("Selected audio device ID:", selectedDeviceId);
+                
+                const constraints = {
+                    audio: {
               deviceId: selectedDeviceId
                 ? { exact: selectedDeviceId }
                 : undefined,
-              echoCancellation: true,
-              noiseSuppression: true,
+                        echoCancellation: true,
+                        noiseSuppression: true,
               autoGainControl: true,
             },
-          };
-          console.log("Audio constraints:", constraints);
-
-          localStream = await navigator.mediaDevices.getUserMedia(constraints);
-          [track] = localStream.getAudioTracks();
-          console.log("Local audio track created:", {
-            kind: track.kind,
-            id: track.id,
-            enabled: track.enabled,
-            muted: track.muted,
-            label: track.label,
+                };
+                console.log("Audio constraints:", constraints);
+                
+                localStream = await navigator.mediaDevices.getUserMedia(constraints);
+                [track] = localStream.getAudioTracks();
+                console.log("Local audio track created:", {
+                    kind: track.kind,
+                    id: track.id,
+                    enabled: track.enabled,
+                    muted: track.muted,
+                    label: track.label,
             deviceId: track.getSettings().deviceId,
-          });
+                });
 
-          // Add local track before creating offer
-          const sender = pc.addTrack(track, localStream);
+                // Add local track before creating offer
+                const sender = pc.addTrack(track, localStream);
           console.log(
             "Added track sender:",
             sender.track?.kind,
@@ -402,8 +399,8 @@
 
           // Create and send offer
           console.log("Creating offer");
-          const offer = await pc.createOffer({
-            offerToReceiveAudio: true,
+                const offer = await pc.createOffer({
+                    offerToReceiveAudio: true,
             offerToReceiveVideo: false,
           });
           await pc.setLocalDescription(offer);
@@ -537,21 +534,21 @@
 
           console.log("WebRTC connection established");
           appendLog("WebRTC connection established");
-          startButtonEl.disabled = false;
+                startButtonEl.disabled = false;
           updateStatus(true);
         } catch (error) {
           console.error("Failed to initialize WebRTC");
         }
-      }
+        }
 
-      // Start speak
-      async function startSpeak() {
-        try {
-          // Prevent duplicate events
-          if (isSpeaking) {
-            console.log("Already speaking, ignoring start speak");
-            return;
-          }
+        // Start speak
+        async function startSpeak() {
+            try {
+                // Prevent duplicate events
+                if (isSpeaking) {
+                    console.log("Already speaking, ignoring start speak");
+                    return;
+                }
 
           // Wait for data channel to be ready with timeout
           if (!dataChannel || dataChannel.readyState !== "open") {
@@ -577,27 +574,27 @@
           dataChannel.send(JSON.stringify({ type: "start_speak" }));
           console.log("Sent start_speak message");
 
-          isSpeaking = true;
-          isCallActive = true;
-          toggleSpeakButtons(true);
-          appendLog("Started speaking");
-        } catch (err) {
-          console.error("Error starting speak:", err);
-          appendLog("Error starting speak: " + err.message);
-          isSpeaking = false;
-          isCallActive = false;
-          toggleSpeakButtons(false);
+                isSpeaking = true;
+                isCallActive = true;
+                toggleSpeakButtons(true);
+                appendLog("Started speaking");
+            } catch (err) {
+                console.error("Error starting speak:", err);
+                appendLog("Error starting speak: " + err.message);
+                isSpeaking = false;
+                isCallActive = false;
+                toggleSpeakButtons(false);
+            }
         }
-      }
 
-      // End speak
-      async function endSpeak() {
-        try {
-          // Prevent duplicate events
-          if (!isSpeaking) {
-            console.log("Not speaking, ignoring end speak");
-            return;
-          }
+        // End speak
+        async function endSpeak() {
+            try {
+                // Prevent duplicate events
+                if (!isSpeaking) {
+                    console.log("Not speaking, ignoring end speak");
+                    return;
+                }
 
           // Wait for data channel to be ready
           if (!dataChannel || dataChannel.readyState !== "open") {
@@ -618,46 +615,46 @@
           dataChannel.send(JSON.stringify({ type: "end_speak" }));
           console.log("Sent end_speak message");
 
-          isSpeaking = false;
-          isCallActive = false;
-          toggleSpeakButtons(false);
-          appendLog("Ended speaking");
-        } catch (err) {
-          console.error("Error ending speak:", err);
-          appendLog("Error ending speak: " + err.message);
-          isSpeaking = false;
-          isCallActive = false;
-          toggleSpeakButtons(false);
+                isSpeaking = false;
+                isCallActive = false;
+                toggleSpeakButtons(false);
+                appendLog("Ended speaking");
+            } catch (err) {
+                console.error("Error ending speak:", err);
+                appendLog("Error ending speak: " + err.message);
+                isSpeaking = false;
+                isCallActive = false;
+                toggleSpeakButtons(false);
+            }
         }
-      }
 
-      // End session
-      async function endSession() {
-        if (isSpeaking) {
-          await endSpeak();
-        }
+        // End session
+        async function endSession() {
+            if (isSpeaking) {
+                await endSpeak();
+            }
         if (dataChannel) {
           dataChannel.close();
+            }
+            if (pc) {
+                pc.close();
+            }
+            isSpeaking = false;
+            isCallActive = false;
+            toggleSessionButtons(false);
+            updateStatus(false);
+            appendLog("Session ended");
         }
-        if (pc) {
-          pc.close();
-        }
-        isSpeaking = false;
-        isCallActive = false;
-        toggleSessionButtons(false);
-        updateStatus(false);
-        appendLog("Session ended");
-      }
 
-      // Send message through data channel
-      function sendMessage() {
-        const text = textInputEl.value.trim();
+        // Send message through data channel
+        function sendMessage() {
+            const text = textInputEl.value.trim();
         if (text && dataChannel && dataChannel.readyState === "open") {
           dataChannel.send(text);
-          appendLog("You: " + text);
-          textInputEl.value = "";
+                appendLog("You: " + text);
+                textInputEl.value = "";
+            }
         }
-      }
 
       // UI helpers
       function toggleSessionButtons(isSessionActive) {
@@ -749,58 +746,58 @@
         }
       }
 
-      // Event listeners
-      startButtonEl.addEventListener("click", async () => {
+        // Event listeners
+        startButtonEl.addEventListener("click", async () => {
         try {
           await initWebRTC();
         } catch (err) {
           console.error("Error starting session:", err);
           appendLog("Error starting session: " + err.message);
-        }
-      });
+            }
+        });
 
-      // Single event listener for speak button
-      startSpeakButtonEl.addEventListener("click", () => {
-        if (isSpeaking) {
-          endSpeak();
-        } else {
-          startSpeak();
-        }
-      });
+        // Single event listener for speak button
+        startSpeakButtonEl.addEventListener("click", () => {
+            if (isSpeaking) {
+                endSpeak();
+            } else {
+                startSpeak();
+            }
+        });
 
-      sendButtonEl.addEventListener("click", sendMessage);
-      textInputEl.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter") {
-          sendMessage();
-        }
-      });
+        sendButtonEl.addEventListener("click", sendMessage);
+        textInputEl.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter") {
+                sendMessage();
+            }
+        });
 
       volumeSlider.addEventListener(
         "input",
         (e) => (remoteAudioEl.volume = e.target.value)
       );
       muteButton.addEventListener("click", () => {
-        const isMuted = remoteAudioEl.muted;
-        remoteAudioEl.muted = !isMuted;
+            const isMuted = remoteAudioEl.muted;
+            remoteAudioEl.muted = !isMuted;
         muteButton.textContent = isMuted ? "🔊" : "🔇";
-      });
+        });
 
       audioInputEl.addEventListener("change", async () => {
         if (pc?.connectionState === "connected") {
-          // If we're already connected, we need to restart the session
-          appendLog("Changing audio input requires session restart");
-          await endSession();
+                // If we're already connected, we need to restart the session
+                appendLog("Changing audio input requires session restart");
+                await endSession();
           await initWebRTC();
-        }
-      });
+            }
+        });
 
       // Initialize audio inputs
-      getAudioInputs();
+        getAudioInputs();
 
       if (window.location.protocol !== 'https:') {
           alert('Please use HTTPS for WebRTC functionality');
           window.location.href = 'https://' + window.location.host + window.location.pathname;
       }
     </script>
-  </body>
-</html>
+</body>
+</html> 

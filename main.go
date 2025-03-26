@@ -483,14 +483,14 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	// Add hardcoded candidate after setting up the connection
 	sdpMid := "0" // Create a string pointer for SDPMid
 	hardcodedCandidate := webrtc.ICECandidateInit{
-		Candidate: "candidate:1 1 udp 2122260223 54.190.53.134 3478 typ host raddr 0.0.0.0 rport 0",
+		Candidate: "candidate:1 1 udp 2122260223 54.190.53.134 3478 typ host generation 0 network-id 1 network-cost 10",
 		SDPMid:    &sdpMid,
 	}
 
 	if err := peerConnection.AddICECandidate(hardcodedCandidate); err != nil {
-		log.Printf("Error adding hardcoded candidate: %v", err)
+		log.Printf("Failed to add hardcoded host candidate: %v", err)
 	} else {
-		log.Printf("Successfully added hardcoded candidate: %s", hardcodedCandidate.Candidate)
+		log.Printf("Successfully added hardcoded host candidate: %s", hardcodedCandidate.Candidate)
 	}
 
 	// Create answer
@@ -569,51 +569,38 @@ func (s *WebRTCServer) handleICECandidate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var msg struct {
-		Candidates []string `json:"candidates"`
+	var data struct {
+		Candidates []webrtc.ICECandidateInit `json:"candidates"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-		log.Printf("Failed to decode ICE candidates: %v", err)
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		log.Printf("Error decoding ICE candidates: %v", err)
 		http.Error(w, "Failed to decode ICE candidates", http.StatusBadRequest)
 		return
 	}
 
-	// Log the received candidates for debugging
-	log.Printf("Received %d ICE candidates", len(msg.Candidates))
-	for i, candidate := range msg.Candidates {
-		log.Printf("Candidate %d: %s", i, candidate)
+	// Add hardcoded host candidate
+	sdpMid := "0"
+	hardcodedCandidate := webrtc.ICECandidateInit{
+		Candidate: "candidate:1 1 udp 2122260223 54.244.51.77 3478 typ host generation 0 network-id 1 network-cost 10",
+		SDPMid:    &sdpMid,
 	}
 
-	s.mu.Lock()
-	if s.peerConnection == nil {
-		s.mu.Unlock()
-		log.Printf("No peer connection available")
-		http.Error(w, "No peer connection available", http.StatusBadRequest)
-		return
+	if err := s.peerConnection.AddICECandidate(hardcodedCandidate); err != nil {
+		log.Printf("Failed to add hardcoded host candidate: %v", err)
+	} else {
+		log.Printf("Successfully added hardcoded host candidate: %s", hardcodedCandidate.Candidate)
 	}
 
-	// Process each candidate
-	for _, candidateStr := range msg.Candidates {
-		log.Printf("Processing ICE candidate: %s", candidateStr)
-
-		// Create ICE candidate init
-		lineIndex := uint16(0)
-		sdpMid := "0"
-		candidate := webrtc.ICECandidateInit{
-			Candidate:     candidateStr,
-			SDPMLineIndex: &lineIndex,
-			SDPMid:        &sdpMid,
-		}
-
-		// Add the candidate to the peer connection
+	// Process received candidates
+	for _, candidate := range data.Candidates {
+		log.Printf("Processing candidate: %s", candidate.Candidate)
 		if err := s.peerConnection.AddICECandidate(candidate); err != nil {
-			log.Printf("Failed to add ICE candidate: %v", err)
+			log.Printf("Error adding candidate: %v", err)
 			continue
 		}
-		log.Printf("Successfully added ICE candidate")
+		log.Printf("Successfully added candidate")
 	}
-	s.mu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
 }
