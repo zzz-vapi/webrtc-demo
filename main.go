@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pion/media"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 )
 
 type WebRTCServer struct {
@@ -56,31 +56,12 @@ func (s *WebRTCServer) createPeerConnection() (*webrtc.PeerConnection, error) {
 				},
 			},
 		},
-		ICETransportPolicy:   webrtc.ICETransportPolicyAll,
-		ICECandidatePoolSize: 2,
-		SDPSemantics:         webrtc.SDPSemanticsUnifiedPlan,
 	}
 
-	// Create media engine and setting supported codecs
-	m := &webrtc.MediaEngine{}
-	if err := m.RegisterDefaultCodecs(); err != nil {
-		return nil, err
-	}
-
-	// Create API with media engine
-	api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
-
-	// Create peer connection
-	peerConnection, err := api.NewPeerConnection(config)
-	if err != nil {
-		return nil, err
-	}
-
-	return peerConnection, nil
+	return webrtc.NewPeerConnection(config)
 }
 
 func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
-	// Log the raw request body for debugging
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("Error reading request body: %v", err)
@@ -89,7 +70,6 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Received offer body: %s", string(body))
 
-	// First try to decode as a raw map to check the type
 	var rawOffer struct {
 		Type string `json:"type"`
 		SDP  string `json:"sdp"`
@@ -100,23 +80,13 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Default to "offer" if type is missing
 	if rawOffer.Type == "" {
 		rawOffer.Type = "offer"
-		log.Printf("No type specified in offer, defaulting to 'offer'")
 	}
 
-	// Create the proper session description
 	offer := webrtc.SessionDescription{
 		Type: webrtc.NewSDPType(rawOffer.Type),
 		SDP:  rawOffer.SDP,
-	}
-
-	// Ensure the offer has the correct SDP type
-	if offer.Type != webrtc.SDPTypeOffer {
-		log.Printf("Invalid SDP type received: %v", offer.Type)
-		http.Error(w, "Invalid SDP type, expected 'offer'", http.StatusBadRequest)
-		return
 	}
 
 	s.mu.Lock()
@@ -273,34 +243,6 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		})
 	})
 
-	// Create a channel to receive ICE gathering completion signal
-	gatherComplete := webrtc.GatheringCompletePromise(s.peerConnection)
-
-	// Add detailed ICE candidate logging
-	s.peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate != nil {
-			log.Printf("New ICE candidate: %s %s:%d typ %s",
-				candidate.Protocol,
-				candidate.Address,
-				candidate.Port,
-				candidate.Typ)
-			log.Printf("Full candidate details: %v", candidate.ToJSON())
-		}
-	})
-
-	s.peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGatheringState) {
-		log.Printf("ICE gathering state changed to: %s", state.String())
-	})
-
-	s.peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		log.Printf("ICE connection state changed to: %s", state.String())
-		if state == webrtc.ICEConnectionStateFailed {
-			log.Printf("ICE Connection failed, checking connection stats...")
-			stats := s.peerConnection.GetStats()
-			log.Printf("Connection stats: %+v", stats)
-		}
-	})
-
 	if err := s.peerConnection.SetRemoteDescription(offer); err != nil {
 		log.Printf("Error setting remote description: %v", err)
 		http.Error(w, "Failed to set remote description", http.StatusInternalServerError)
@@ -320,26 +262,8 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Wait for ICE gathering to complete or timeout
-	select {
-	case <-gatherComplete:
-		log.Printf("ICE gathering completed")
-	case <-time.After(3 * time.Second):
-		log.Printf("ICE gathering timed out, sending partial candidates")
-	}
-
-	// Get the updated local description after ICE gathering
-	answer = *s.peerConnection.LocalDescription()
-
 	w.Header().Set("Content-Type", "application/json")
-	response := struct {
-		Type string `json:"type"`
-		SDP  string `json:"sdp"`
-	}{
-		Type: answer.Type.String(),
-		SDP:  answer.SDP,
-	}
-	json.NewEncoder(w).Encode(response)
+	json.NewEncoder(w).Encode(answer)
 }
 
 type ICECandidate struct {
