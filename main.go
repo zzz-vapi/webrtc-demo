@@ -11,12 +11,20 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pion/media"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
 
 type WebRTCServer struct {
 	peerConnection *webrtc.PeerConnection
+	audioTrack     *webrtc.TrackLocalStaticSample
 	mu             sync.Mutex
+	isSpeaking     bool
+	audioBuffer    [][]byte
+	stopTrack      chan struct{}
+	trackActive    bool
+	stopTrackMu    sync.Mutex
 }
 
 func testSTUNConnectivity() {
@@ -121,6 +129,150 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create audio track for echo
+	audioTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: "audio/opus"}, "audio", "pion")
+	if err != nil {
+		log.Printf("Failed to create audio track: %v", err)
+		http.Error(w, "Failed to create audio track", http.StatusInternalServerError)
+		return
+	}
+
+	s.mu.Lock()
+	s.audioTrack = audioTrack
+	s.audioBuffer = make([][]byte, 0)
+	s.stopTrack = make(chan struct{})
+	s.trackActive = false
+	s.mu.Unlock()
+
+	// Add the audio track to the peer connection
+	_, err = s.peerConnection.AddTrack(audioTrack)
+	if err != nil {
+		log.Printf("Failed to add audio track: %v", err)
+		http.Error(w, "Failed to add audio track", http.StatusInternalServerError)
+		return
+	}
+
+	// Handle incoming tracks
+	s.peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		log.Printf("New track received: %s, kind: %s, codec: %s", track.ID(), track.Kind(), track.Codec().MimeType)
+
+		buf := make([]byte, 1500)
+		for {
+			i, _, err := track.Read(buf)
+			if err != nil {
+				log.Printf("Error reading track: %v", err)
+				return
+			}
+
+			s.mu.Lock()
+			shouldProcess := s.isSpeaking && s.trackActive
+			s.mu.Unlock()
+
+			if shouldProcess {
+				packet := make([]byte, i)
+				copy(packet, buf[:i])
+
+				rtpPacket := &rtp.Packet{}
+				if err := rtpPacket.Unmarshal(packet); err != nil {
+					log.Printf("Error unmarshaling RTP packet: %v", err)
+					continue
+				}
+
+				s.mu.Lock()
+				s.audioBuffer = append(s.audioBuffer, packet)
+				s.mu.Unlock()
+				log.Printf("Buffered audio packet: seq=%d, ts=%d, size=%d bytes",
+					rtpPacket.SequenceNumber, rtpPacket.Timestamp, len(packet))
+			}
+
+			select {
+			case <-s.stopTrack:
+				log.Printf("Stopping track processing")
+				s.mu.Lock()
+				s.trackActive = false
+				s.mu.Unlock()
+				continue
+			default:
+				// Continue processing
+			}
+		}
+	})
+
+	// Handle data channel
+	s.peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
+		log.Printf("New DataChannel %s, ID: %d", d.Label(), d.ID())
+
+		d.OnOpen(func() {
+			log.Printf("DataChannel %s opened", d.Label())
+		})
+
+		d.OnMessage(func(msg webrtc.DataChannelMessage) {
+			log.Printf("DataChannel %s received: %s", d.Label(), string(msg.Data))
+
+			var message map[string]interface{}
+			if err := json.Unmarshal(msg.Data, &message); err == nil {
+				if msgType, ok := message["type"].(string); ok {
+					switch msgType {
+					case "start_speak":
+						s.mu.Lock()
+						s.isSpeaking = true
+						s.trackActive = true
+						s.audioBuffer = make([][]byte, 0)
+						s.mu.Unlock()
+
+						s.stopTrackMu.Lock()
+						s.stopTrack = make(chan struct{})
+						s.stopTrackMu.Unlock()
+
+						log.Printf("Started speaking - ready to receive audio")
+						d.SendText("Started speaking")
+
+					case "end_speak":
+						s.mu.Lock()
+						s.isSpeaking = false
+						s.trackActive = false
+						bufferCopy := make([][]byte, len(s.audioBuffer))
+						copy(bufferCopy, s.audioBuffer)
+						s.audioBuffer = make([][]byte, 0)
+						s.mu.Unlock()
+
+						s.stopTrackMu.Lock()
+						close(s.stopTrack)
+						s.stopTrackMu.Unlock()
+
+						// Echo back all buffered audio
+						go func(buffer [][]byte) {
+							log.Printf("Starting to echo back %d audio packets", len(buffer))
+
+							for _, packet := range buffer {
+								rtpPacket := &rtp.Packet{}
+								if err := rtpPacket.Unmarshal(packet); err != nil {
+									log.Printf("Error unmarshaling RTP packet during playback: %v", err)
+									continue
+								}
+
+								if err := s.audioTrack.WriteSample(media.Sample{
+									Data:     rtpPacket.Payload,
+									Duration: time.Millisecond * 20,
+								}); err != nil {
+									log.Printf("Error writing sample: %v", err)
+								} else {
+									log.Printf("Echoed audio packet: seq=%d, ts=%d, size=%d bytes",
+										rtpPacket.SequenceNumber, rtpPacket.Timestamp, len(rtpPacket.Payload))
+								}
+
+								time.Sleep(time.Millisecond * 20)
+							}
+							log.Printf("Finished echoing back audio packets")
+						}(bufferCopy)
+
+						d.SendText("Ended speaking")
+					}
+				}
+			}
+		})
+	})
+
 	// Create a channel to receive ICE gathering completion signal
 	gatherComplete := webrtc.GatheringCompletePromise(s.peerConnection)
 
@@ -147,19 +299,6 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 			stats := s.peerConnection.GetStats()
 			log.Printf("Connection stats: %+v", stats)
 		}
-	})
-
-	// Add data channel handling
-	s.peerConnection.OnDataChannel(func(dc *webrtc.DataChannel) {
-		log.Printf("New DataChannel %s, ID: %d", dc.Label(), dc.ID())
-
-		dc.OnOpen(func() {
-			log.Printf("DataChannel %s opened", dc.Label())
-		})
-
-		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-			log.Printf("DataChannel %s received: %s", dc.Label(), string(msg.Data))
-		})
 	})
 
 	if err := s.peerConnection.SetRemoteDescription(offer); err != nil {
