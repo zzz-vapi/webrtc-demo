@@ -146,19 +146,35 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 			log.Printf("- Signaling state: %s", peerConnection.SignalingState())
 			log.Printf("- ICE gathering state: %s", peerConnection.ICEGatheringState())
 			log.Printf("- ICE connection state: %s", peerConnection.ICEConnectionState())
+
+			// Log TURN server status
+			for _, server := range iceServers {
+				for _, url := range server.URLs {
+					if strings.Contains(url, "turn") {
+						log.Printf("TURN server status - URL: %s, Username: %s, Credential: %s",
+							url, server.Username, server.Credential)
+					}
+				}
+			}
 		}
 	})
 
 	// Add ICE connection state change handler
 	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		log.Printf("ICE connection state changed to: %s", state)
-		if state == webrtc.ICEConnectionStateFailed {
-			log.Printf("ICE connection failed - checking TURN server connectivity")
+		if state == webrtc.ICEConnectionStateChecking {
+			log.Printf("ICE connection checking - attempting to establish connection")
+			// Log current candidates
+			s.candidatesMutex.Lock()
+			log.Printf("Current pending candidates: %d", len(s.pendingCandidates))
+			s.candidatesMutex.Unlock()
+		} else if state == webrtc.ICEConnectionStateFailed {
+			log.Printf("ICE connection failed - checking TURN server authentication")
 			// Log TURN server status
 			for _, server := range iceServers {
 				for _, url := range server.URLs {
 					if strings.Contains(url, "turn") {
-						log.Printf("TURN server URL: %s, Username: %s, Credential: %s",
+						log.Printf("TURN server authentication test - URL: %s, Username: %s, Credential: %s",
 							url, server.Username, server.Credential)
 						// Try to connect to TURN server to verify connectivity
 						go func(turnURL, username, credential string) {
