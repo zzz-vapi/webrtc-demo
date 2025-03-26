@@ -576,11 +576,12 @@ func (s *WebRTCServer) handleICECandidate(w http.ResponseWriter, r *http.Request
 
 	// Process received candidates
 	for _, candidateData := range data.Candidates {
-		sdpMLineIndex := candidateData.SDPMLineIndex
+		sdpMid := candidateData.SDPMid
+		sdpMLineIndex := uint16(candidateData.SDPMLineIndex)
 		candidate := webrtc.ICECandidateInit{
 			Candidate:     candidateData.Candidate,
-			SDPMid:        candidateData.SDPMid,
-			SDPMLineIndex: &sdpMLineIndex,
+			SDPMid:        &sdpMid,        // SDPMid needs to be a pointer in v4
+			SDPMLineIndex: &sdpMLineIndex, // SDPMLineIndex needs to be *uint16 in v4
 		}
 
 		log.Printf("Processing ICE candidate: %s", candidate.Candidate)
