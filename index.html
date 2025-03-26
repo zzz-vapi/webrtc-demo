@@ -226,10 +226,13 @@
           dataChannel.onopen = () => {
             console.log('Data channel opened');
             appendLog('Control channel opened');
+            // Enable the speak button only after data channel is ready
+            startSpeakButtonEl.disabled = false;
           };
           dataChannel.onclose = () => {
             console.log('Data channel closed');
             appendLog('Control channel closed');
+            startSpeakButtonEl.disabled = true;
           };
           dataChannel.onmessage = (event) => {
             console.log('Received message:', event.data);
@@ -313,15 +316,24 @@
             return;
           }
 
-          // Send start speak message through data channel
-          if (dataChannel && dataChannel.readyState === 'open') {
-            dataChannel.send(JSON.stringify({ type: 'start_speak' }));
-            console.log('Sent start_speak message');
-          } else {
-            console.error('Data channel not ready');
-            appendLog('Error: Control channel not ready');
-            return;
+          // Wait for data channel to be ready
+          if (!dataChannel || dataChannel.readyState !== 'open') {
+            console.log("Waiting for data channel to be ready...");
+            await new Promise(resolve => {
+              const checkChannel = () => {
+                if (dataChannel && dataChannel.readyState === 'open') {
+                  resolve();
+                } else {
+                  setTimeout(checkChannel, 100);
+                }
+              };
+              checkChannel();
+            });
           }
+
+          // Send start speak message through data channel
+          dataChannel.send(JSON.stringify({ type: 'start_speak' }));
+          console.log('Sent start_speak message');
 
           isSpeaking = true;
           isCallActive = true;
@@ -345,15 +357,24 @@
             return;
           }
 
-          // Send end speak message through data channel
-          if (dataChannel && dataChannel.readyState === 'open') {
-            dataChannel.send(JSON.stringify({ type: 'end_speak' }));
-            console.log('Sent end_speak message');
-          } else {
-            console.error('Data channel not ready');
-            appendLog('Error: Control channel not ready');
-            return;
+          // Wait for data channel to be ready
+          if (!dataChannel || dataChannel.readyState !== 'open') {
+            console.log("Waiting for data channel to be ready...");
+            await new Promise(resolve => {
+              const checkChannel = () => {
+                if (dataChannel && dataChannel.readyState === 'open') {
+                  resolve();
+                } else {
+                  setTimeout(checkChannel, 100);
+                }
+              };
+              checkChannel();
+            });
           }
+
+          // Send end speak message through data channel
+          dataChannel.send(JSON.stringify({ type: 'end_speak' }));
+          console.log('Sent end_speak message');
 
           isSpeaking = false;
           isCallActive = false;
