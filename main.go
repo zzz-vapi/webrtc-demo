@@ -11,12 +11,21 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pion/rtp/v2"
 	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 )
 
 type WebRTCServer struct {
 	peerConnection *webrtc.PeerConnection
+	dataChannel    *webrtc.DataChannel
+	audioTrack     *webrtc.TrackLocalStaticSample
 	mu             sync.Mutex
+	isSpeaking     bool
+	audioBuffer    [][]byte
+	stopTrack      chan struct{}
+	trackActive    bool
+	stopTrackMu    sync.Mutex
 }
 
 func testSTUNConnectivity() {
@@ -150,15 +159,116 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Add data channel handling
-	s.peerConnection.OnDataChannel(func(dc *webrtc.DataChannel) {
-		log.Printf("New DataChannel %s, ID: %d", dc.Label(), dc.ID())
+	s.peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
+		log.Printf("New DataChannel %s %d", d.Label(), d.ID())
 
-		dc.OnOpen(func() {
-			log.Printf("DataChannel %s opened", dc.Label())
+		s.mu.Lock()
+		s.dataChannel = d
+		s.mu.Unlock()
+
+		d.OnOpen(func() {
+			log.Printf("Data channel '%s'-'%d' opened.", d.Label(), d.ID())
 		})
 
-		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
-			log.Printf("DataChannel %s received: %s", dc.Label(), string(msg.Data))
+		d.OnMessage(func(msg webrtc.DataChannelMessage) {
+			log.Printf("Message from DataChannel '%s': '%s'", d.Label(), string(msg.Data))
+
+			// Handle speak control messages
+			var message map[string]interface{}
+			if err := json.Unmarshal(msg.Data, &message); err == nil {
+				if msgType, ok := message["type"].(string); ok {
+					switch msgType {
+					case "start_speak":
+						s.mu.Lock()
+						s.isSpeaking = true
+						s.trackActive = true
+						s.audioBuffer = make([][]byte, 0) // Clear previous buffer
+						s.mu.Unlock()
+
+						// Safely create new stop channel
+						s.stopTrackMu.Lock()
+						// Create new channel without closing the old one
+						s.stopTrack = make(chan struct{})
+						s.stopTrackMu.Unlock()
+
+						log.Printf("Started speaking - ready to receive audio")
+						d.SendText("Started speaking")
+
+					case "end_speak":
+						s.mu.Lock()
+						s.isSpeaking = false
+						s.trackActive = false
+						s.mu.Unlock()
+
+						// Safely close the stop channel
+						s.stopTrackMu.Lock()
+						if s.stopTrack != nil {
+							select {
+							case <-s.stopTrack:
+								// Channel already closed
+							default:
+								close(s.stopTrack)
+							}
+						}
+						s.stopTrackMu.Unlock()
+
+						// Make a copy of the buffer before clearing it
+						s.mu.Lock()
+						bufferCopy := make([][]byte, len(s.audioBuffer))
+						copy(bufferCopy, s.audioBuffer)
+						s.audioBuffer = make([][]byte, 0)
+						s.mu.Unlock()
+
+						// Echo back all buffered audio
+						go func(buffer [][]byte) {
+							log.Printf("Starting to echo back %d audio packets", len(buffer))
+
+							// Create a buffered channel for audio packets
+							audioChan := make(chan []byte, len(buffer))
+
+							// Send all packets to the channel
+							for _, packet := range buffer {
+								audioChan <- packet
+							}
+							close(audioChan)
+
+							// Process packets with proper timing
+							for packet := range audioChan {
+								// Parse the original RTP packet
+								rtpPacket := &rtp.Packet{}
+								if err := rtpPacket.Unmarshal(packet); err != nil {
+									log.Printf("Error unmarshaling RTP packet during playback: %v", err)
+									continue
+								}
+
+								// Write the sample with proper timing
+								if err := s.audioTrack.WriteSample(media.Sample{
+									Data:     rtpPacket.Payload,
+									Duration: time.Millisecond * 20, // Standard Opus frame duration
+								}); err != nil {
+									log.Printf("Error writing sample: %v", err)
+								} else {
+									log.Printf("Echoed buffered audio packet: seq=%d, ts=%d, size=%d bytes",
+										rtpPacket.SequenceNumber, rtpPacket.Timestamp, len(rtpPacket.Payload))
+								}
+
+								// Add a small delay between packets to maintain proper timing
+								time.Sleep(time.Millisecond * 20)
+							}
+							log.Printf("Finished echoing back audio packets")
+						}(bufferCopy)
+						d.SendText("Ended speaking")
+
+					default:
+						// Echo regular messages back
+						d.SendText("Server received: " + string(msg.Data))
+					}
+					return
+				}
+			}
+
+			// Echo regular messages back
+			d.SendText("Server received: " + string(msg.Data))
 		})
 	})
 

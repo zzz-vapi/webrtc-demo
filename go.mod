@@ -3,7 +3,7 @@ module webrtc-server
 go 1.21
 
 require (
-	github.com/pion/rtp v1.8.13
+	github.com/pion/rtp/v2 v2.0.0
 	github.com/pion/webrtc/v4 v4.0.14
 )
 
@@ -17,6 +17,7 @@ require (
 	github.com/pion/mdns/v2 v2.0.7 // indirect
 	github.com/pion/randutil v0.1.0 // indirect
 	github.com/pion/rtcp v1.2.15 // indirect
+	github.com/pion/rtp v1.8.13 // indirect
 	github.com/pion/sctp v1.8.37 // indirect
 	github.com/pion/sdp/v3 v3.0.11 // indirect
 	github.com/pion/srtp/v3 v3.0.4 // indirect
