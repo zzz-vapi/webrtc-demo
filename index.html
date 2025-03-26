@@ -192,10 +192,23 @@
             ]
           });
 
+          // Log ICE connection state changes
+          pc.oniceconnectionstatechange = () => {
+            console.log('ICE Connection State:', pc.iceConnectionState);
+            appendLog('ICE Connection State: ' + pc.iceConnectionState);
+          };
+
+          // Log signaling state changes
+          pc.onsignalingstatechange = () => {
+            console.log('Signaling State:', pc.signalingState);
+            appendLog('Signaling State: ' + pc.signalingState);
+          };
+
           // Handle ICE candidates
           pc.onicecandidate = async (event) => {
             if (event.candidate) {
               try {
+                console.log('Sending ICE candidate:', event.candidate);
                 const response = await fetch('/ice-candidate', {
                   method: 'POST',
                   headers: {
@@ -208,6 +221,7 @@
                 if (!response.ok) {
                   throw new Error('Failed to send ICE candidate');
                 }
+                console.log('ICE candidate sent successfully');
               } catch (err) {
                 console.error('Error sending ICE candidate:', err);
                 appendLog('Error sending ICE candidate: ' + err.message);
@@ -218,22 +232,34 @@
           // Handle incoming tracks
           pc.ontrack = (event) => {
             console.log('Received remote track:', event.track.kind);
+            appendLog('Received remote track: ' + event.track.kind);
             remoteAudioEl.srcObject = event.streams[0];
           };
 
           // Create data channel for control messages
-          dataChannel = pc.createDataChannel('control');
+          console.log('Creating data channel');
+          dataChannel = pc.createDataChannel('control', {
+            ordered: true,
+            maxRetransmits: 3
+          });
+
           dataChannel.onopen = () => {
             console.log('Data channel opened');
             appendLog('Control channel opened');
-            // Enable the speak button only after data channel is ready
             startSpeakButtonEl.disabled = false;
           };
+
           dataChannel.onclose = () => {
             console.log('Data channel closed');
             appendLog('Control channel closed');
             startSpeakButtonEl.disabled = true;
           };
+
+          dataChannel.onerror = (error) => {
+            console.error('Data channel error:', error);
+            appendLog('Control channel error: ' + error.message);
+          };
+
           dataChannel.onmessage = (event) => {
             console.log('Received message:', event.data);
             appendLog('Server: ' + event.data);
@@ -269,6 +295,7 @@
           console.log("Added track sender:", sender.track?.kind, sender.track?.id);
 
           // Create and send offer
+          console.log('Creating offer');
           const offer = await pc.createOffer({
             offerToReceiveAudio: true,
             offerToReceiveVideo: false
@@ -276,6 +303,7 @@
           await pc.setLocalDescription(offer);
 
           try {
+            console.log('Sending offer to server');
             const response = await fetch('/offer', {
               method: 'POST',
               headers: {
@@ -291,6 +319,7 @@
             }
 
             const answer = await response.json();
+            console.log('Received answer from server');
             await pc.setRemoteDescription(answer);
           } catch (err) {
             console.error('Error during offer/answer exchange:', err);
@@ -316,12 +345,17 @@
             return;
           }
 
-          // Wait for data channel to be ready
+          // Wait for data channel to be ready with timeout
           if (!dataChannel || dataChannel.readyState !== 'open') {
             console.log("Waiting for data channel to be ready...");
-            await new Promise(resolve => {
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => {
+                reject(new Error('Timeout waiting for data channel'));
+              }, 5000); // 5 second timeout
+
               const checkChannel = () => {
                 if (dataChannel && dataChannel.readyState === 'open') {
+                  clearTimeout(timeout);
                   resolve();
                 } else {
                   setTimeout(checkChannel, 100);

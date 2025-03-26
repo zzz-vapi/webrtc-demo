@@ -55,6 +55,7 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 
 	// Create a new peer connection if one doesn't exist
 	if s.peerConnection == nil {
+		log.Printf("Creating new peer connection")
 		config := webrtc.Configuration{
 			ICEServers: []webrtc.ICEServer{
 				{
@@ -65,13 +66,25 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 
 		peerConnection, err := webrtc.NewPeerConnection(config)
 		if err != nil {
+			log.Printf("Failed to create peer connection: %v", err)
 			http.Error(w, fmt.Sprintf("Failed to create peer connection: %v", err), http.StatusInternalServerError)
 			return
 		}
 
+		// Log ICE connection state changes
+		peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+			log.Printf("ICE Connection State changed to: %s", state)
+		})
+
+		// Log signaling state changes
+		peerConnection.OnSignalingStateChange(func(state webrtc.SignalingState) {
+			log.Printf("Signaling State changed to: %s", state)
+		})
+
 		// Create audio track for echo
 		audioTrack, err := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: "audio/opus"}, "audio", "pion")
 		if err != nil {
+			log.Printf("Failed to create audio track: %v", err)
 			http.Error(w, fmt.Sprintf("Failed to create audio track: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -82,6 +95,7 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		// Add the audio track to the peer connection
 		_, err = peerConnection.AddTrack(audioTrack)
 		if err != nil {
+			log.Printf("Failed to add audio track: %v", err)
 			http.Error(w, fmt.Sprintf("Failed to add audio track: %v", err), http.StatusInternalServerError)
 			return
 		}
@@ -237,28 +251,37 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		SDP:  msg.SDP,
 	}
 
+	log.Printf("Setting remote description (offer)")
 	err := s.peerConnection.SetRemoteDescription(offer)
 	if err != nil {
+		log.Printf("Failed to set remote description: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to set remote description: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("Creating answer")
 	answer, err := s.peerConnection.CreateAnswer(nil)
 	if err != nil {
+		log.Printf("Failed to create answer: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to create answer: %v", err), http.StatusInternalServerError)
 		return
 	}
 
+	log.Printf("Setting local description (answer)")
 	err = s.peerConnection.SetLocalDescription(answer)
 	if err != nil {
+		log.Printf("Failed to set local description: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to set local description: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	// Add any pending ICE candidates
+	log.Printf("Adding %d pending ICE candidates", len(s.pendingCandidates))
 	for _, candidate := range s.pendingCandidates {
 		if err := s.peerConnection.AddICECandidate(candidate); err != nil {
 			log.Printf("Error adding pending ICE candidate: %v", err)
+		} else {
+			log.Printf("Successfully added pending ICE candidate")
 		}
 	}
 	s.pendingCandidates = nil // Clear the pending candidates
@@ -307,6 +330,7 @@ func (s *WebRTCServer) handleIceCandidate(w http.ResponseWriter, r *http.Request
 		Candidate webrtc.ICECandidateInit `json:"candidate"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		log.Printf("Error decoding ICE candidate: %v", err)
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -323,6 +347,7 @@ func (s *WebRTCServer) handleIceCandidate(w http.ResponseWriter, r *http.Request
 	}
 
 	// Add the candidate to the existing peer connection
+	log.Printf("Adding ICE candidate to peer connection")
 	err := s.peerConnection.AddICECandidate(msg.Candidate)
 	if err != nil {
 		log.Printf("Error adding ICE candidate: %v", err)
@@ -330,6 +355,7 @@ func (s *WebRTCServer) handleIceCandidate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	log.Printf("Successfully added ICE candidate")
 	w.WriteHeader(http.StatusOK)
 }
 
