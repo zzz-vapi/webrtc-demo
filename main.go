@@ -97,11 +97,12 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	s.credentialsMutex.RUnlock()
 
 	config := webrtc.Configuration{
-		ICEServers:         iceServers,
-		ICETransportPolicy: webrtc.ICETransportPolicyRelay,
-		BundlePolicy:       webrtc.BundlePolicyMaxBundle,
-		RTCPMuxPolicy:      webrtc.RTCPMuxPolicyRequire,
-		SDPSemantics:       webrtc.SDPSemanticsUnifiedPlan,
+		ICEServers:           iceServers,
+		ICETransportPolicy:   webrtc.ICETransportPolicyAll,
+		BundlePolicy:         webrtc.BundlePolicyMaxBundle,
+		RTCPMuxPolicy:        webrtc.RTCPMuxPolicyRequire,
+		SDPSemantics:         webrtc.SDPSemanticsUnifiedPlan,
+		ICECandidatePoolSize: 10,
 	}
 
 	// Log ICE server configuration
@@ -206,8 +207,8 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		log.Printf("New ICE candidate: %s", candidate.String())
-		log.Printf("Candidate details - Protocol: %s, Address: %s, Port: %d, Type: %s",
-			candidate.Protocol, candidate.Address, candidate.Port, candidate.Typ)
+		log.Printf("Candidate details - Protocol: %s, Address: %s, Port: %d, Type: %s, Component: %d, Foundation: %s",
+			candidate.Protocol, candidate.Address, candidate.Port, candidate.Typ, candidate.Component, candidate.Foundation)
 	})
 
 	// Create audio track for echo
