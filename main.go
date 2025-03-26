@@ -76,7 +76,15 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 					Username:   "openrelayproject",
 					Credential: "openrelayproject",
 				},
+				{
+					URLs:       []string{"turn:openrelay.metered.ca:80?transport=tcp"},
+					Username:   "openrelayproject",
+					Credential: "openrelayproject",
+				},
 			},
+			ICETransportPolicy: webrtc.ICETransportPolicyAll,
+			BundlePolicy:       webrtc.BundlePolicyMaxBundle,
+			RTCPMuxPolicy:      webrtc.RTCPMuxPolicyRequire,
 		}
 
 		peerConnection, err := webrtc.NewPeerConnection(config)
