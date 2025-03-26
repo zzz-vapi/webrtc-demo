@@ -108,7 +108,7 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 				// Log connection stats
 				stats := peerConnection.GetStats()
 				for _, stat := range stats {
-					log.Printf("Connection Stat: %+v", stat)
+					//log.Printf(" Connection Stat: %+v", stat)
 				}
 			}
 		})
