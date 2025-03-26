@@ -65,22 +65,34 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Log request received
-	log.Printf("Received offer request")
+	// Add CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
-	var offerMsg struct {
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var msg struct {
 		SDP string `json:"sdp"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&offerMsg); err != nil {
-		log.Printf("Failed to decode offer message: %v", err)
+
+	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		log.Printf("Failed to decode offer: %v", err)
 		http.Error(w, "Failed to decode offer", http.StatusBadRequest)
 		return
 	}
 
+	// Log the received offer for debugging
+	log.Printf("Received offer: %s", msg.SDP)
+
 	// Create SessionDescription from SDP
 	offer := webrtc.SessionDescription{
 		Type: webrtc.SDPTypeOffer,
-		SDP:  offerMsg.SDP,
+		SDP:  msg.SDP,
 	}
 
 	// Log offer received
@@ -216,7 +228,8 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
-	// Add detailed ICE candidate logging
+	// Set up ICE candidate handler BEFORE setting remote description
+	log.Printf("Setting up ICE candidate handler")
 	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
 			log.Printf("ICE candidate gathering completed")
@@ -225,6 +238,60 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		log.Printf("New ICE candidate: %s", candidate.String())
 		log.Printf("Candidate details - Protocol: %s, Address: %s, Port: %d, Type: %s, Component: %d, Foundation: %s",
 			candidate.Protocol, candidate.Address, candidate.Port, candidate.Typ, candidate.Component, candidate.Foundation)
+
+		// Check if it's a TURN candidate
+		if candidate.Typ == webrtc.ICECandidateTypeRelay {
+			log.Printf("Found TURN candidate: %s", candidate.String())
+		}
+	})
+
+	// Set up connection state handler BEFORE setting remote description
+	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		log.Printf("Connection state changed to: %s", state)
+		if state == webrtc.PeerConnectionStateFailed {
+			log.Printf("Connection failed - checking ICE candidates")
+			s.candidatesMutex.Lock()
+			log.Printf("Number of pending candidates: %d", len(s.pendingCandidates))
+			s.candidatesMutex.Unlock()
+
+			// Log current ICE connection state
+			log.Printf("Current ICE connection state: %s", peerConnection.ICEConnectionState())
+			log.Printf("Current ICE gathering state: %s", peerConnection.ICEGatheringState())
+
+			// Log connection state details
+			log.Printf("Connection state details:")
+			log.Printf("- Connection state: %s", peerConnection.ConnectionState())
+			log.Printf("- Signaling state: %s", peerConnection.SignalingState())
+			log.Printf("- ICE gathering state: %s", peerConnection.ICEGatheringState())
+			log.Printf("- ICE connection state: %s", peerConnection.ICEConnectionState())
+		}
+	})
+
+	// Set up ICE connection state handler BEFORE setting remote description
+	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
+		log.Printf("ICE connection state changed to: %s", state)
+		if state == webrtc.ICEConnectionStateChecking {
+			log.Printf("ICE connection checking - attempting to establish connection")
+			// Log current candidates
+			s.candidatesMutex.Lock()
+			log.Printf("Current pending candidates: %d", len(s.pendingCandidates))
+			s.candidatesMutex.Unlock()
+		} else if state == webrtc.ICEConnectionStateFailed {
+			log.Printf("ICE connection failed - checking TURN server authentication")
+			// Log current connection state
+			log.Printf("Current connection state: %s", peerConnection.ConnectionState())
+			log.Printf("Current ICE gathering state: %s", peerConnection.ICEGatheringState())
+		}
+	})
+
+	// Set up ICE gathering state handler BEFORE setting remote description
+	peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
+		log.Printf("ICE gathering state changed to: %s", state)
+		if state == webrtc.ICEGathererStateComplete {
+			// Log ICE gathering completion
+			log.Printf("ICE gathering completed with state: %s", state)
+			log.Printf("Current ICE connection state: %s", peerConnection.ICEConnectionState())
+		}
 	})
 
 	// Create audio track for echo
@@ -383,55 +450,6 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		})
 	})
 
-	// Set up connection state handler BEFORE setting remote description
-	peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		log.Printf("Connection state changed to: %s", state)
-		if state == webrtc.PeerConnectionStateFailed {
-			log.Printf("Connection failed - checking ICE candidates")
-			s.candidatesMutex.Lock()
-			log.Printf("Number of pending candidates: %d", len(s.pendingCandidates))
-			s.candidatesMutex.Unlock()
-
-			// Log current ICE connection state
-			log.Printf("Current ICE connection state: %s", peerConnection.ICEConnectionState())
-			log.Printf("Current ICE gathering state: %s", peerConnection.ICEGatheringState())
-
-			// Log connection state details
-			log.Printf("Connection state details:")
-			log.Printf("- Connection state: %s", peerConnection.ConnectionState())
-			log.Printf("- Signaling state: %s", peerConnection.SignalingState())
-			log.Printf("- ICE gathering state: %s", peerConnection.ICEGatheringState())
-			log.Printf("- ICE connection state: %s", peerConnection.ICEConnectionState())
-		}
-	})
-
-	// Set up ICE connection state handler BEFORE setting remote description
-	peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
-		log.Printf("ICE connection state changed to: %s", state)
-		if state == webrtc.ICEConnectionStateChecking {
-			log.Printf("ICE connection checking - attempting to establish connection")
-			// Log current candidates
-			s.candidatesMutex.Lock()
-			log.Printf("Current pending candidates: %d", len(s.pendingCandidates))
-			s.candidatesMutex.Unlock()
-		} else if state == webrtc.ICEConnectionStateFailed {
-			log.Printf("ICE connection failed - checking TURN server authentication")
-			// Log current connection state
-			log.Printf("Current connection state: %s", peerConnection.ConnectionState())
-			log.Printf("Current ICE gathering state: %s", peerConnection.ICEGatheringState())
-		}
-	})
-
-	// Set up ICE gathering state handler BEFORE setting remote description
-	peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
-		log.Printf("ICE gathering state changed to: %s", state)
-		if state == webrtc.ICEGathererStateComplete {
-			// Log ICE gathering completion
-			log.Printf("ICE gathering completed with state: %s", state)
-			log.Printf("Current ICE connection state: %s", peerConnection.ICEConnectionState())
-		}
-	})
-
 	// Set the remote description
 	log.Printf("Setting remote description")
 	if err := peerConnection.SetRemoteDescription(offer); err != nil {
@@ -519,16 +537,32 @@ func (s *WebRTCServer) handleICECandidate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// Add CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight requests
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	var msg struct {
 		Candidates []string `json:"candidates"`
 	}
+
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-		log.Printf("Failed to decode ICE candidates message: %v", err)
+		log.Printf("Failed to decode ICE candidates: %v", err)
 		http.Error(w, "Failed to decode ICE candidates", http.StatusBadRequest)
 		return
 	}
 
+	// Log the received candidates for debugging
 	log.Printf("Received %d ICE candidates", len(msg.Candidates))
+	for i, candidate := range msg.Candidates {
+		log.Printf("Candidate %d: %s", i, candidate)
+	}
 
 	s.mu.Lock()
 	if s.peerConnection == nil {
@@ -666,21 +700,8 @@ func (s *WebRTCServer) convertTwilioICEServers(twilioResp *TwilioResponse) []web
 	return iceServers
 }
 
-func main() {
-	server := &WebRTCServer{
-		credentialsMutex: sync.RWMutex{},
-	}
-
-	// Serve static files (including index.html)
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/" {
-			http.ServeFile(w, r, "index.html")
-			return
-		}
-		http.NotFound(w, r)
-	})
-
-	// Fetch initial Twilio credentials
+// Add this function to load Twilio credentials
+func loadTwilioCredentials() (*TwilioResponse, error) {
 	accountSid := os.Getenv("TWILIO_ACCOUNT_SID")
 	authToken := os.Getenv("TWILIO_AUTH_TOKEN")
 
@@ -689,8 +710,8 @@ func main() {
 
 	if accountSid == "" || authToken == "" {
 		log.Printf("Warning: TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN not set, using openrelay.metered.ca servers")
-		// Set default configuration using openrelay.metered.ca
-		server.twilioCredentials = &TwilioResponse{
+		// Return default configuration using openrelay.metered.ca
+		return &TwilioResponse{
 			ICEServers: []ICEServer{
 				{
 					URLs: "stun:stun.l.google.com:19302",
@@ -711,63 +732,83 @@ func main() {
 					Credential: "openrelayproject",
 				},
 			},
-		}
-		log.Printf("Using openrelay.metered.ca TURN servers")
+		}, nil
+	}
+
+	// Fetch credentials from Twilio
+	url := fmt.Sprintf("https://api.twilio.com/2010-04-01/Accounts/%s/Tokens.json", accountSid)
+	log.Printf("Fetching Twilio credentials from: %s", url)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest("POST", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("error creating request: %v", err)
+	}
+
+	req.SetBasicAuth(accountSid, authToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching Twilio credentials: %v", err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("Twilio API response status: %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("Twilio API returned error status: %d", resp.StatusCode)
+	}
+
+	var twilioResp TwilioResponse
+	if err := json.NewDecoder(resp.Body).Decode(&twilioResp); err != nil {
+		return nil, fmt.Errorf("error decoding Twilio response: %v", err)
+	}
+
+	// Save the response to a file for debugging
+	twilioRespJSON, err := json.MarshalIndent(twilioResp, "", "  ")
+	if err != nil {
+		log.Printf("Error marshaling Twilio response: %v", err)
 	} else {
-		// Fetch credentials from Twilio
-		url := fmt.Sprintf("https://api.twilio.com/2010-04-01/Accounts/%s/Tokens.json", accountSid)
-		log.Printf("Fetching Twilio credentials from: %s", url)
-
-		client := &http.Client{Timeout: 10 * time.Second}
-		req, err := http.NewRequest("POST", url, nil)
+		err = os.WriteFile("twilio_response.json", twilioRespJSON, 0644)
 		if err != nil {
-			log.Printf("Error creating request: %v", err)
-			return
-		}
-
-		req.SetBasicAuth(accountSid, authToken)
-		resp, err := client.Do(req)
-		if err != nil {
-			log.Printf("Error fetching Twilio credentials: %v", err)
-			return
-		}
-		defer resp.Body.Close()
-
-		log.Printf("Twilio API response status: %d", resp.StatusCode)
-		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-			log.Printf("Twilio API returned error status: %d", resp.StatusCode)
-			return
-		}
-
-		var twilioResp TwilioResponse
-		if err := json.NewDecoder(resp.Body).Decode(&twilioResp); err != nil {
-			log.Printf("Error decoding Twilio response: %v", err)
-			return
-		}
-
-		// Save the response to a file for debugging
-		twilioRespJSON, err := json.MarshalIndent(twilioResp, "", "  ")
-		if err != nil {
-			log.Printf("Error marshaling Twilio response: %v", err)
+			log.Printf("Error saving Twilio response to file: %v", err)
 		} else {
-			err = os.WriteFile("twilio_response.json", twilioRespJSON, 0644)
-			if err != nil {
-				log.Printf("Error saving Twilio response to file: %v", err)
-			} else {
-				log.Printf("Saved Twilio response to twilio_response.json")
-			}
-		}
-
-		server.credentialsMutex.Lock()
-		server.twilioCredentials = &twilioResp
-		server.credentialsMutex.Unlock()
-
-		log.Printf("Successfully initialized Twilio credentials with %d ICE servers", len(twilioResp.ICEServers))
-		// Log each ICE server
-		for i, server := range twilioResp.ICEServers {
-			log.Printf("ICE Server %d: URL=%s, Username=%s", i, server.URL, server.Username)
+			log.Printf("Saved Twilio response to twilio_response.json")
 		}
 	}
+
+	log.Printf("Successfully fetched Twilio credentials with %d ICE servers", len(twilioResp.ICEServers))
+	// Log each ICE server
+	for i, server := range twilioResp.ICEServers {
+		log.Printf("ICE Server %d: URL=%s, Username=%s", i, server.URL, server.Username)
+	}
+
+	return &twilioResp, nil
+}
+
+// Then modify main() to use this function
+func main() {
+	server := &WebRTCServer{
+		credentialsMutex: sync.RWMutex{},
+	}
+
+	// Load Twilio credentials
+	twilioResp, err := loadTwilioCredentials()
+	if err != nil {
+		log.Printf("Error loading Twilio credentials: %v", err)
+		// Continue with default configuration
+	} else {
+		server.credentialsMutex.Lock()
+		server.twilioCredentials = twilioResp
+		server.credentialsMutex.Unlock()
+	}
+
+	// Serve static files
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/" {
+			http.ServeFile(w, r, "index.html")
+			return
+		}
+		http.NotFound(w, r)
+	})
 
 	// Set up routes
 	http.HandleFunc("/ice-servers", server.getICEServers)

@@ -156,6 +156,11 @@
       </div>
     </div>
 
+    <div class="warning">
+        This site uses a self-signed certificate for development purposes.
+        You may need to accept the security warning in your browser.
+    </div>
+
     <script>
       // WebRTC globals
       let pc; // RTCPeerConnection
@@ -182,6 +187,9 @@
       const settingsButtonEl = document.getElementById("settingsButton");
       const audioInputEl = document.getElementById("audioInput");
 
+      // Get the base URL from the current window location
+      const baseURL = window.location.origin;
+
       // Initialize WebRTC connection
       async function getICEServers() {
         try {
@@ -207,7 +215,14 @@
 
       async function initWebRTC() {
         try {
-          const iceServers = await getICEServers();
+          const iceServers = [{
+            urls: [
+              "turns:your-turn-server:443?transport=tcp",  // TURN over TLS
+              "turns:your-turn-server:443?transport=udp"   // TURN over DTLS
+            ],
+            username: "webrtc",
+            credential: "webrtc"
+          }];
 
           pc = new RTCPeerConnection({
             iceServers,
@@ -250,31 +265,26 @@
             }
           };
 
-          // Handle ICE candidates with detailed logging
+          // Set up ICE candidate handler BEFORE creating the offer
           pc.onicecandidate = async (event) => {
             if (event.candidate) {
-              try {
-                console.log("New ICE candidate:", event.candidate.candidate);
-                console.log("Candidate details:", {
-                  protocol: event.candidate.protocol,
-                  address: event.candidate.address,
-                  port: event.candidate.port,
-                  type: event.candidate.type,
-                  component: event.candidate.component,
-                  foundation: event.candidate.foundation,
-                  priority: event.candidate.priority,
-                  sdpMid: event.candidate.sdpMid,
-                  sdpMLineIndex: event.candidate.sdpMLineIndex,
-                });
+              console.log("New ICE candidate:", event.candidate);
+              console.log("Candidate details:", {
+                protocol: event.candidate.protocol,
+                address: event.candidate.address,
+                port: event.candidate.port,
+                type: event.candidate.type,
+                component: event.candidate.component,
+                foundation: event.candidate.foundation,
+                priority: event.candidate.priority,
+                sdpMid: event.candidate.sdpMid,
+                sdpMLineIndex: event.candidate.sdpMLineIndex,
+              });
 
-                // Check if it's a TURN candidate
-                if (event.candidate.type === "relay") {
-                  console.log("Found TURN candidate:", event.candidate.candidate);
-                  appendLog("Found TURN candidate: " + event.candidate.candidate);
-                }
-              } catch (err) {
-                console.error("Error logging ICE candidate:", err);
-                appendLog("Error logging ICE candidate: " + err.message);
+              // Check if it's a TURN candidate
+              if (event.candidate.type === "relay") {
+                console.log("Found TURN candidate:", event.candidate.candidate);
+                appendLog("Found TURN candidate: " + event.candidate.candidate);
               }
             } else {
               console.log("ICE candidate gathering completed");
@@ -292,7 +302,8 @@
 
               // Send all candidates to the server
               try {
-                const response = await fetch("/ice-candidates", {
+                console.log("Sending ICE candidates to server");
+                const response = await fetch(`${baseURL}/ice-candidates`, {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
@@ -310,6 +321,37 @@
                 console.error("Error sending ICE candidates:", err);
                 appendLog("Error sending ICE candidates: " + err.message);
               }
+            }
+          };
+
+          // Set up ICE connection state handler BEFORE creating the offer
+          pc.oniceconnectionstatechange = () => {
+            console.log("ICE connection state changed:", pc.iceConnectionState);
+            appendLog("ICE connection state: " + pc.iceConnectionState);
+            if (pc.iceConnectionState === "failed") {
+              console.log("ICE connection failed - checking TURN server connectivity");
+              appendLog("ICE connection failed - checking TURN server connectivity");
+              // Log current ICE gathering state
+              console.log("Current ICE gathering state:", pc.iceGatheringState);
+              appendLog("Current ICE gathering state: " + pc.iceGatheringState);
+              // Log current signaling state
+              console.log("Current signaling state:", pc.signalingState);
+              appendLog("Current signaling state: " + pc.signalingState);
+            }
+          };
+
+          // Set up ICE gathering state handler BEFORE creating the offer
+          pc.onicegatheringstatechange = () => {
+            console.log("ICE gathering state changed:", pc.iceGatheringState);
+            appendLog("ICE gathering state: " + pc.iceGatheringState);
+            if (pc.iceGatheringState === "complete") {
+              // Log all gathered candidates
+              pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
+                if (line.startsWith("a=candidate:")) {
+                  console.log("Local candidate:", line);
+                  appendLog("Local candidate: " + line);
+                }
+              });
             }
           };
 
@@ -381,37 +423,6 @@
             }
           };
 
-          // Set up ICE connection state handler BEFORE creating the offer
-          pc.oniceconnectionstatechange = () => {
-            console.log("ICE connection state changed:", pc.iceConnectionState);
-            appendLog("ICE connection state: " + pc.iceConnectionState);
-            if (pc.iceConnectionState === "failed") {
-              console.log("ICE connection failed - checking TURN server connectivity");
-              appendLog("ICE connection failed - checking TURN server connectivity");
-              // Log current ICE gathering state
-              console.log("Current ICE gathering state:", pc.iceGatheringState);
-              appendLog("Current ICE gathering state: " + pc.iceGatheringState);
-              // Log current signaling state
-              console.log("Current signaling state:", pc.signalingState);
-              appendLog("Current signaling state: " + pc.signalingState);
-            }
-          };
-
-          // Set up ICE gathering state handler BEFORE creating the offer
-          pc.onicegatheringstatechange = () => {
-            console.log("ICE gathering state changed:", pc.iceGatheringState);
-            appendLog("ICE gathering state: " + pc.iceGatheringState);
-            if (pc.iceGatheringState === "complete") {
-              // Log all gathered candidates
-              pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
-                if (line.startsWith("a=candidate:")) {
-                  console.log("Local candidate:", line);
-                  appendLog("Local candidate: " + line);
-                }
-              });
-            }
-          };
-
           // Get local audio stream with selected device
           const selectedDeviceId = audioInputEl.value;
           console.log("Selected audio device ID:", selectedDeviceId);
@@ -457,7 +468,7 @@
 
           try {
             console.log("Sending offer to server");
-            const response = await fetch("/offer", {
+            const response = await fetch(`${baseURL}/offer`, {
               method: "POST",
               headers: {
                 "Content-Type": "application/json",
@@ -474,26 +485,6 @@
             const answer = await response.json();
             console.log("Received answer from server");
             await pc.setRemoteDescription(answer);
-
-            // Wait for data channel to be ready with timeout
-            await new Promise((resolve, reject) => {
-              const timeout = setTimeout(() => {
-                reject(new Error("Timeout waiting for data channel"));
-              }, 5000); // 5 second timeout
-
-              const checkChannel = () => {
-                if (dataChannel && dataChannel.readyState === "open") {
-                  clearTimeout(timeout);
-                  resolve();
-                } else {
-                  setTimeout(checkChannel, 100);
-                }
-              };
-              checkChannel();
-            });
-
-            console.log("Data channel is ready");
-            appendLog("Data channel is ready");
 
             // Wait for ICE gathering to complete
             await new Promise((resolve, reject) => {
@@ -527,7 +518,8 @@
 
             // Send all candidates to the server
             try {
-              const response = await fetch("/ice-candidates", {
+              console.log("Sending ICE candidates to server");
+              const candidateResponse = await fetch(`${baseURL}/ice-candidates`, {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
@@ -536,14 +528,60 @@
                   candidates: candidates,
                 }),
               });
-              if (!response.ok) {
+              if (!candidateResponse.ok) {
                 throw new Error("Failed to send ICE candidates");
               }
               console.log("All ICE candidates sent successfully");
               appendLog("All ICE candidates sent successfully");
+
+              // Wait for connection to be established
+              await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                  reject(new Error("Timeout waiting for connection"));
+                }, 5000); // 5 second timeout
+
+                const checkConnection = () => {
+                  if (pc.connectionState === "connected") {
+                    clearTimeout(timeout);
+                    resolve();
+                  } else if (pc.connectionState === "failed") {
+                    clearTimeout(timeout);
+                    reject(new Error("Connection failed"));
+                  } else {
+                    setTimeout(checkConnection, 100);
+                  }
+                };
+                checkConnection();
+              });
+
+              console.log("Connection established");
+              appendLog("Connection established");
+
+              // Now wait for data channel to be ready
+              await new Promise((resolve, reject) => {
+                const timeout = setTimeout(() => {
+                  reject(new Error("Timeout waiting for data channel"));
+                }, 5000); // 5 second timeout
+
+                const checkChannel = () => {
+                  if (dataChannel && dataChannel.readyState === "open") {
+                    clearTimeout(timeout);
+                    resolve();
+                  } else if (dataChannel && dataChannel.readyState === "closed") {
+                    clearTimeout(timeout);
+                    reject(new Error("Data channel closed"));
+                  } else {
+                    setTimeout(checkChannel, 100);
+                  }
+                };
+                checkChannel();
+              });
+
+              console.log("Data channel is ready");
+              appendLog("Data channel is ready");
             } catch (err) {
-              console.error("Error sending ICE candidates:", err);
-              appendLog("Error sending ICE candidates: " + err.message);
+              console.error("Error during connection setup:", err);
+              throw err;
             }
           } catch (err) {
             console.error("Error during offer/answer exchange:", err);
@@ -811,6 +849,11 @@
 
       // Initialize audio inputs
       getAudioInputs();
+
+      if (window.location.protocol !== 'https:') {
+          alert('Please use HTTPS for WebRTC functionality');
+          window.location.href = 'https://' + window.location.host + window.location.pathname;
+      }
     </script>
   </body>
 </html>
