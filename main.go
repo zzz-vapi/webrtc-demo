@@ -45,13 +45,30 @@ func (s *WebRTCServer) createPeerConnection() (*webrtc.PeerConnection, error) {
 				URLs: []string{
 					"stun:stun.l.google.com:19302",
 					"stun:stun1.l.google.com:19302",
-					"stun:stun2.l.google.com:19302",
 				},
 			},
 		},
+		ICETransportPolicy:   webrtc.ICETransportPolicyAll,
+		ICECandidatePoolSize: 2,
+		SDPSemantics:         webrtc.SDPSemanticsUnifiedPlan,
 	}
 
-	return webrtc.NewPeerConnection(config)
+	// Create media engine and setting supported codecs
+	m := &webrtc.MediaEngine{}
+	if err := m.RegisterDefaultCodecs(); err != nil {
+		return nil, err
+	}
+
+	// Create API with media engine
+	api := webrtc.NewAPI(webrtc.WithMediaEngine(m))
+
+	// Create peer connection
+	peerConnection, err := api.NewPeerConnection(config)
+	if err != nil {
+		return nil, err
+	}
+
+	return peerConnection, nil
 }
 
 func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
@@ -104,6 +121,9 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create a channel to receive ICE gathering completion signal
+	gatherComplete := webrtc.GatheringCompletePromise(s.peerConnection)
+
 	// Add detailed ICE candidate logging
 	s.peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate != nil {
@@ -122,6 +142,25 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 
 	s.peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 		log.Printf("ICE connection state changed to: %s", state.String())
+		if state == webrtc.ICEConnectionStateFailed {
+			log.Printf("ICE Connection failed, checking connection stats...")
+			if stats, err := s.peerConnection.GetStats(); err == nil {
+				log.Printf("Connection stats: %+v", stats)
+			}
+		}
+	})
+
+	// Add data channel handling
+	s.peerConnection.OnDataChannel(func(dc *webrtc.DataChannel) {
+		log.Printf("New DataChannel %s, ID: %d", dc.Label(), dc.ID())
+
+		dc.OnOpen(func() {
+			log.Printf("DataChannel %s opened", dc.Label())
+		})
+
+		dc.OnMessage(func(msg webrtc.DataChannelMessage) {
+			log.Printf("DataChannel %s received: %s", dc.Label(), string(msg.Data))
+		})
 	})
 
 	if err := s.peerConnection.SetRemoteDescription(offer); err != nil {
@@ -143,8 +182,26 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Wait for ICE gathering to complete or timeout
+	select {
+	case <-gatherComplete:
+		log.Printf("ICE gathering completed")
+	case <-time.After(3 * time.Second):
+		log.Printf("ICE gathering timed out, sending partial candidates")
+	}
+
+	// Get the updated local description after ICE gathering
+	answer = *s.peerConnection.LocalDescription()
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(answer)
+	response := struct {
+		Type string `json:"type"`
+		SDP  string `json:"sdp"`
+	}{
+		Type: answer.Type.String(),
+		SDP:  answer.SDP,
+	}
+	json.NewEncoder(w).Encode(response)
 }
 
 type ICECandidate struct {
