@@ -483,7 +483,7 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	// Add hardcoded candidate after setting up the connection
 	sdpMid := "0" // Create a string pointer for SDPMid
 	hardcodedCandidate := webrtc.ICECandidateInit{
-		Candidate: "candidate:1 1 udp 2122260223 54.190.53.134 3478 typ srflx raddr 0.0.0.0 rport 0",
+		Candidate: "candidate:1 1 udp 2122260223 54.190.53.134 3478 typ host raddr 0.0.0.0 rport 0",
 		SDPMid:    &sdpMid,
 	}
 
