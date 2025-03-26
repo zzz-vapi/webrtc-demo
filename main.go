@@ -75,6 +75,12 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Default to "offer" if type is missing
+	if rawOffer.Type == "" {
+		rawOffer.Type = "offer"
+		log.Printf("No type specified in offer, defaulting to 'offer'")
+	}
+
 	// Create the proper session description
 	offer := webrtc.SessionDescription{
 		Type: webrtc.NewSDPType(rawOffer.Type),
