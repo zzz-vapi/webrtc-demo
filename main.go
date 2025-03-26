@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v3"
-	"github.com/pion/webrtc/v3/pkg/media"
+	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 )
 
 type WebRTCServer struct {
@@ -218,30 +218,39 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		}
 	})
 
-	// Add ICE gathering state change handler
-	peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
-		log.Printf("ICE gathering state changed to: %s", state)
-		if state == webrtc.ICEGathererStateComplete {
-			// Log ICE gathering completion
-			log.Printf("ICE gathering completed with state: %s", state)
-			log.Printf("Current ICE connection state: %s", peerConnection.ICEConnectionState())
+	// Update the OnICEGatheringStateChange handler
+	peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGatheringState) {
+		log.Printf("ICE gathering state changed to: %s", state.String())
+		if state == webrtc.ICEGatheringStateComplete {
+			log.Printf("ICE gathering completed with state: %s", state.String())
+
+			// Get local description
+			localDesc := peerConnection.LocalDescription()
+			if localDesc != nil {
+				log.Printf("Local description: %s", localDesc.SDP)
+			}
 		}
 	})
 
 	// Set up ICE candidate handler BEFORE setting remote description
 	log.Printf("Setting up ICE candidate handler")
 	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			log.Printf("ICE candidate gathering completed")
-			return
-		}
-		log.Printf("New ICE candidate: %s", candidate.String())
-		log.Printf("Candidate details - Protocol: %s, Address: %s, Port: %d, Type: %s, Component: %d, Foundation: %s",
-			candidate.Protocol, candidate.Address, candidate.Port, candidate.Typ, candidate.Component, candidate.Foundation)
+		if candidate != nil {
+			candidateStr := candidate.String()
+			log.Printf("New ICE candidate: %s", candidateStr)
 
-		// Check if it's a TURN candidate
-		if candidate.Typ == webrtc.ICECandidateTypeRelay {
-			log.Printf("Found TURN candidate: %s", candidate.String())
+			// Log candidate details directly
+			log.Printf("Candidate details - Protocol: %s, Address: %s, Port: %d, Component: %d, Foundation: %s",
+				candidate.Protocol,
+				candidate.Address,
+				candidate.Port,
+				candidate.Component,
+				candidate.Foundation)
+
+			// Check if it's a TURN/relay candidate by looking at the candidate string
+			if strings.Contains(candidateStr, "typ relay") {
+				log.Printf("Found TURN candidate: %s", candidateStr)
+			}
 		}
 	})
 
@@ -285,11 +294,10 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Set up ICE gathering state handler BEFORE setting remote description
-	peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
-		log.Printf("ICE gathering state changed to: %s", state)
-		if state == webrtc.ICEGathererStateComplete {
-			// Log ICE gathering completion
-			log.Printf("ICE gathering completed with state: %s", state)
+	peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGatheringState) {
+		log.Printf("ICE gathering state changed to: %s", state.String())
+		if state == webrtc.ICEGatheringStateComplete {
+			log.Printf("ICE gathering completed with state: %s", state.String())
 			log.Printf("Current ICE connection state: %s", peerConnection.ICEConnectionState())
 		}
 	})
@@ -471,6 +479,19 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	}
 	s.pendingCandidates = nil
 	s.candidatesMutex.Unlock()
+
+	// Add hardcoded candidate after setting up the connection
+	sdpMid := "0" // Create a string pointer for SDPMid
+	hardcodedCandidate := webrtc.ICECandidateInit{
+		Candidate: "candidate:1 1 udp 2122260223 54.190.53.134 3478 typ srflx raddr 0.0.0.0 rport 0",
+		SDPMid:    &sdpMid,
+	}
+
+	if err := peerConnection.AddICECandidate(hardcodedCandidate); err != nil {
+		log.Printf("Error adding hardcoded candidate: %v", err)
+	} else {
+		log.Printf("Successfully added hardcoded candidate: %s", hardcodedCandidate.Candidate)
+	}
 
 	// Create answer
 	log.Printf("Creating answer")
