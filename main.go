@@ -63,18 +63,22 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	log.Printf("Received offer body: %s", string(body))
-	r.Body = io.NopCloser(bytes.NewBuffer(body))
 
-	var offer webrtc.SessionDescription
-	if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&offer); err != nil {
-		log.Printf("Error decoding offer: %v", err)
+	// First try to decode as a raw map to check the type
+	var rawOffer struct {
+		Type string `json:"type"`
+		SDP  string `json:"sdp"`
+	}
+	if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&rawOffer); err != nil {
+		log.Printf("Error decoding raw offer: %v", err)
 		http.Error(w, "Failed to decode offer", http.StatusBadRequest)
 		return
 	}
 
-	// Explicitly set the type if it's not set
-	if offer.Type == "" {
-		offer.Type = webrtc.SDPTypeOffer
+	// Create the proper session description
+	offer := webrtc.SessionDescription{
+		Type: webrtc.NewSDPType(rawOffer.Type),
+		SDP:  rawOffer.SDP,
 	}
 
 	// Ensure the offer has the correct SDP type
@@ -85,7 +89,6 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	var err error
 	s.peerConnection, err = s.createPeerConnection()
 	s.mu.Unlock()
 
