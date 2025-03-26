@@ -55,11 +55,26 @@ func (s *WebRTCServer) createPeerConnection() (*webrtc.PeerConnection, error) {
 }
 
 func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
+	// Log the raw request body for debugging
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("Error reading request body: %v", err)
+		http.Error(w, "Failed to read request body", http.StatusBadRequest)
+		return
+	}
+	log.Printf("Received offer body: %s", string(body))
+	r.Body = io.NopCloser(bytes.NewBuffer(body))
+
 	var offer webrtc.SessionDescription
-	if err := json.NewDecoder(r.Body).Decode(&offer); err != nil {
+	if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&offer); err != nil {
 		log.Printf("Error decoding offer: %v", err)
 		http.Error(w, "Failed to decode offer", http.StatusBadRequest)
 		return
+	}
+
+	// Explicitly set the type if it's not set
+	if offer.Type == "" {
+		offer.Type = webrtc.SDPTypeOffer
 	}
 
 	// Ensure the offer has the correct SDP type
