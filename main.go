@@ -480,19 +480,6 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 	s.pendingCandidates = nil
 	s.candidatesMutex.Unlock()
 
-	// Add hardcoded candidate after setting up the connection
-	// sdpMid := "0" // Create a string pointer for SDPMid
-	// hardcodedCandidate := webrtc.ICECandidateInit{
-	// 	Candidate: "candidate:1 1 udp 2122260223 54.190.53.134 3478 typ host generation 0 network-id 1 network-cost 10",
-	// 	SDPMid:    &sdpMid,
-	// }
-
-	// if err := peerConnection.AddICECandidate(hardcodedCandidate); err != nil {
-	// 	log.Printf("Failed to add hardcoded host candidate: %v", err)
-	// } else {
-	// 	log.Printf("Successfully added hardcoded host candidate: %s", hardcodedCandidate.Candidate)
-	// }
-
 	// Create answer
 	log.Printf("Creating answer")
 	answer, err := peerConnection.CreateAnswer(nil)
@@ -579,18 +566,6 @@ func (s *WebRTCServer) handleICECandidate(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Add hardcoded host candidate
-	sdpMid := "0"
-	hardcodedCandidate := webrtc.ICECandidateInit{
-		Candidate: "candidate:1 1 udp 2122260223 54.244.51.77 3478 typ host generation 0 network-id 1 network-cost 10",
-		SDPMid:    &sdpMid,
-	}
-
-	if err := s.peerConnection.AddICECandidate(hardcodedCandidate); err != nil {
-		log.Printf("Failed to add hardcoded host candidate: %v", err)
-	} else {
-		log.Printf("Successfully added hardcoded host candidate: %s", hardcodedCandidate.Candidate)
-	}
 
 	// Process received candidates
 	for _, candidate := range data.Candidates {
