@@ -94,14 +94,65 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Log ICE connection state changes
+		// Set up ICE connection state change handler
 		peerConnection.OnICEConnectionStateChange(func(state webrtc.ICEConnectionState) {
 			log.Printf("ICE Connection State changed to: %s", state)
+			if state == webrtc.ICEConnectionStateFailed {
+				// Log all gathered candidates
+				sdp := peerConnection.LocalDescription()
+				if sdp != nil {
+					log.Printf("Local SDP:\n%s", sdp.SDP)
+				}
+
+				// Log connection stats
+				stats := peerConnection.GetStats()
+				for _, stat := range stats {
+					log.Printf("Connection Stat: %+v", stat)
+				}
+			}
 		})
 
-		// Log signaling state changes
+		// Add ICE candidate gathering state change handler
+		peerConnection.OnICEGatheringStateChange(func(state webrtc.ICEGathererState) {
+			log.Printf("ICE Gathering State changed to: %s", state)
+		})
+
+		// Add signaling state change handler
 		peerConnection.OnSignalingStateChange(func(state webrtc.SignalingState) {
 			log.Printf("Signaling State changed to: %s", state)
+		})
+
+		// Add connection state change handler
+		peerConnection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+			log.Printf("Connection State changed to: %s", state)
+		})
+
+		// Add ICE candidate handler with detailed logging
+		peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+			if candidate == nil {
+				log.Println("ICE candidate gathering completed")
+				return
+			}
+			log.Printf("New ICE candidate: %s", candidate.String())
+			log.Printf("ICE candidate details - Protocol: %s, Address: %s, Port: %d",
+				candidate.Protocol, candidate.Address, candidate.Port)
+		})
+
+		// Add negotiation needed handler
+		peerConnection.OnNegotiationNeeded(func() {
+			log.Println("Negotiation needed")
+		})
+
+		// Add track handler with detailed logging
+		peerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+			log.Printf("Received track: %s, kind: %s, ssrc: %d", track.ID(), track.Kind(), track.SSRC())
+			log.Printf("Track details - Codec: %s, PayloadType: %d", track.Codec().MimeType, track.PayloadType())
+		})
+
+		// Add data channel handler with detailed logging
+		peerConnection.OnDataChannel(func(channel *webrtc.DataChannel) {
+			log.Printf("Received data channel: %s, label: %s", channel.ID(), channel.Label())
+			log.Printf("Data channel ready state: %s", channel.ReadyState().String())
 		})
 
 		// Create audio track for echo
@@ -274,28 +325,47 @@ func (s *WebRTCServer) handleOffer(w http.ResponseWriter, r *http.Request) {
 		SDP:  msg.SDP,
 	}
 
-	log.Printf("Setting remote description (offer)")
+	log.Printf("Received offer:\n%s", offer.SDP)
+
+	// Set the remote description
+	log.Println("Setting remote description (offer)")
 	err := s.peerConnection.SetRemoteDescription(offer)
 	if err != nil {
-		log.Printf("Failed to set remote description: %v", err)
+		log.Printf("Error setting remote description: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to set remote description: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Creating answer")
+	// Create and set the answer
+	log.Println("Creating answer")
 	answer, err := s.peerConnection.CreateAnswer(nil)
 	if err != nil {
-		log.Printf("Failed to create answer: %v", err)
+		log.Printf("Error creating answer: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to create answer: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Setting local description (answer)")
+	log.Printf("Created answer:\n%s", answer.SDP)
+
+	// Set local description
+	log.Println("Setting local description (answer)")
 	err = s.peerConnection.SetLocalDescription(answer)
 	if err != nil {
-		log.Printf("Failed to set local description: %v", err)
+		log.Printf("Error setting local description: %v", err)
 		http.Error(w, fmt.Sprintf("Failed to set local description: %v", err), http.StatusInternalServerError)
 		return
+	}
+
+	// Log ICE gathering state
+	log.Printf("ICE Gathering State: %s", s.peerConnection.ICEGatheringState())
+
+	// Log current connection state
+	log.Printf("Current Connection State: %s", s.peerConnection.ConnectionState())
+
+	// Log all gathered candidates
+	sdp := s.peerConnection.LocalDescription()
+	if sdp != nil {
+		log.Printf("Final Local SDP:\n%s", sdp.SDP)
 	}
 
 	// Add any pending ICE candidates
