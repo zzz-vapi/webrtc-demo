@@ -183,144 +183,161 @@
       const audioInputEl = document.getElementById("audioInput");
 
       // Initialize WebRTC connection
+      async function getICEServers() {
+        try {
+          const response = await fetch("/ice-servers", {
+            method: "GET",
+            credentials: "same-origin",
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+
+          if (!response.ok) {
+            throw new Error("Failed to get ICE servers");
+          }
+
+          const config = await response.json();
+          return config.iceServers;
+        } catch (error) {
+          console.error("Error fetching ICE servers");
+          throw error;
+        }
+      }
+
       async function initWebRTC() {
         try {
-          // Create peer connection
+          const iceServers = await getICEServers();
+
           pc = new RTCPeerConnection({
-            iceServers: [
-              {
-                urls: 'turn:openrelay.metered.ca:80',
-                username: 'openrelayproject',
-                credential: 'openrelayproject'
-              },
-              {
-                urls: 'turn:openrelay.metered.ca:443',
-                username: 'openrelayproject',
-                credential: 'openrelayproject'
-              },
-              {
-                urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-                username: 'openrelayproject',
-                credential: 'openrelayproject'
-              },
-              {
-                urls: 'turn:openrelay.metered.ca:80?transport=tcp',
-                username: 'openrelayproject',
-                credential: 'openrelayproject'
-              },
-              {
-                urls: 'turn:relay.metered.ca:80',
-                username: 'openrelayproject',
-                credential: 'openrelayproject'
-              },
-              {
-                urls: 'turn:relay.metered.ca:443',
-                username: 'openrelayproject',
-                credential: 'openrelayproject'
-              },
-              {
-                urls: 'turn:relay.metered.ca:443?transport=tcp',
-                username: 'openrelayproject',
-                credential: 'openrelayproject'
-              },
-              {
-                urls: 'turn:relay.metered.ca:80?transport=tcp',
-                username: 'openrelayproject',
-                credential: 'openrelayproject'
-              }
-            ],
-            iceTransportPolicy: 'relay', // Force TURN only
-            bundlePolicy: 'max-bundle',
-            rtcpMuxPolicy: 'require'
+            iceServers,
+            iceTransportPolicy: "all",
+            bundlePolicy: "max-bundle",
+            rtcpMuxPolicy: "require",
           });
 
           // Log ICE connection state changes
           pc.oniceconnectionstatechange = () => {
-            console.log('ICE Connection State:', pc.iceConnectionState);
-            appendLog('ICE Connection State: ' + pc.iceConnectionState);
+            console.log("ICE Connection State:", pc.iceConnectionState);
+            appendLog("ICE Connection State: " + pc.iceConnectionState);
+            if (pc.iceConnectionState === "failed") {
+              console.log("ICE connection failed - checking candidates");
+              appendLog("ICE connection failed - checking candidates");
+              // Log current candidates
+              pc.currentRemoteDescription?.sdp.split("\n").forEach((line) => {
+                if (line.startsWith("a=candidate:")) {
+                  console.log("Remote candidate:", line);
+                  appendLog("Remote candidate: " + line);
+                }
+              });
+            }
           };
 
           // Log ICE gathering state changes
           pc.onicegatheringstatechange = () => {
-            console.log('ICE Gathering State:', pc.iceGatheringState);
-            appendLog('ICE Gathering State: ' + pc.iceGatheringState);
+            console.log("ICE Gathering State:", pc.iceGatheringState);
+            appendLog("ICE Gathering State: " + pc.iceGatheringState);
+            if (pc.iceGatheringState === "complete") {
+              console.log("ICE gathering completed - checking candidates");
+              appendLog("ICE gathering completed - checking candidates");
+              // Log current candidates
+              pc.currentLocalDescription?.sdp.split("\n").forEach((line) => {
+                if (line.startsWith("a=candidate:")) {
+                  console.log("Local candidate:", line);
+                  appendLog("Local candidate: " + line);
+                }
+              });
+            }
           };
 
           // Handle ICE candidates with detailed logging
           pc.onicecandidate = async (event) => {
             if (event.candidate) {
               try {
-                console.log('New ICE candidate:', event.candidate.candidate);
-                console.log('Candidate details:', {
+                console.log("New ICE candidate:", event.candidate.candidate);
+                console.log("Candidate details:", {
                   protocol: event.candidate.protocol,
                   address: event.candidate.address,
                   port: event.candidate.port,
-                  type: event.candidate.type
+                  type: event.candidate.type,
                 });
-                
+
                 // Check if it's a TURN candidate
-                if (event.candidate.type === 'relay') {
-                  console.log('Found TURN candidate:', event.candidate.candidate);
-                  appendLog('Found TURN candidate: ' + event.candidate.candidate);
+                if (event.candidate.type === "relay") {
+                  console.log(
+                    "Found TURN candidate:",
+                    event.candidate.candidate
+                  );
+                  appendLog(
+                    "Found TURN candidate: " + event.candidate.candidate
+                  );
                 }
 
-                const response = await fetch('/ice-candidate', {
-                  method: 'POST',
+                const response = await fetch("/ice-candidate", {
+                  method: "POST",
                   headers: {
-                    'Content-Type': 'application/json'
+                    "Content-Type": "application/json",
                   },
                   body: JSON.stringify({
-                    candidate: event.candidate.toJSON()
-                  })
+                    candidate: event.candidate.toJSON(),
+                  }),
                 });
                 if (!response.ok) {
-                  throw new Error('Failed to send ICE candidate');
+                  throw new Error("Failed to send ICE candidate");
                 }
-                console.log('ICE candidate sent successfully');
+                console.log("ICE candidate sent successfully");
               } catch (err) {
-                console.error('Error sending ICE candidate:', err);
-                appendLog('Error sending ICE candidate: ' + err.message);
+                console.error("Error sending ICE candidate:", err);
+                appendLog("Error sending ICE candidate: " + err.message);
               }
             } else {
-              console.log('ICE candidate gathering completed');
-              appendLog('ICE candidate gathering completed');
+              console.log("ICE candidate gathering completed");
+              appendLog("ICE candidate gathering completed");
             }
           };
 
           // Handle incoming tracks
           pc.ontrack = (event) => {
-            console.log('Received remote track:', event.track.kind);
-            appendLog('Received remote track: ' + event.track.kind);
-            remoteAudioEl.srcObject = event.streams[0];
+            console.log("Received remote track:", event.track.kind);
+            appendLog("Received remote track: " + event.track.kind);
+
+            // Set up audio element
+            if (event.track.kind === "audio") {
+              remoteAudioEl.srcObject = event.streams[0];
+              remoteAudioEl.play().catch((err) => {
+                console.error("Error playing audio:", err);
+                appendLog("Error playing audio: " + err.message);
+              });
+            }
           };
 
           // Create data channel for control messages
-          console.log('Creating data channel');
-          dataChannel = pc.createDataChannel('control', {
+          console.log("Creating data channel");
+          dataChannel = pc.createDataChannel("control", {
             ordered: true,
-            maxRetransmits: 3
+            maxRetransmits: 3,
           });
 
           dataChannel.onopen = () => {
-            console.log('Data channel opened');
-            appendLog('Control channel opened');
+            console.log("Data channel opened");
+            appendLog("Control channel opened");
             startSpeakButtonEl.disabled = false;
           };
 
           dataChannel.onclose = () => {
-            console.log('Data channel closed');
-            appendLog('Control channel closed');
+            console.log("Data channel closed");
+            appendLog("Control channel closed");
             startSpeakButtonEl.disabled = true;
           };
 
           dataChannel.onerror = (error) => {
-            console.error('Data channel error:', error);
-            appendLog('Control channel error: ' + error.message);
+            console.error("Data channel error:", error);
+            appendLog("Control channel error: " + error.message);
           };
 
           dataChannel.onmessage = (event) => {
-            console.log('Received message:', event.data);
-            appendLog('Server: ' + event.data);
+            console.log("Received message:", event.data);
+            appendLog("Server: " + event.data);
           };
 
           // Get local audio stream with selected device
@@ -329,11 +346,13 @@
 
           const constraints = {
             audio: {
-              deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
+              deviceId: selectedDeviceId
+                ? { exact: selectedDeviceId }
+                : undefined,
               echoCancellation: true,
               noiseSuppression: true,
-              autoGainControl: true
-            }
+              autoGainControl: true,
+            },
           };
           console.log("Audio constraints:", constraints);
 
@@ -345,52 +364,117 @@
             enabled: track.enabled,
             muted: track.muted,
             label: track.label,
-            deviceId: track.getSettings().deviceId
+            deviceId: track.getSettings().deviceId,
           });
 
           // Add local track before creating offer
           const sender = pc.addTrack(track, localStream);
-          console.log("Added track sender:", sender.track?.kind, sender.track?.id);
+          console.log(
+            "Added track sender:",
+            sender.track?.kind,
+            sender.track?.id
+          );
+
+          // Set up audio processing
+          const audioContext = new AudioContext();
+          const source = audioContext.createMediaStreamSource(localStream);
+          const processor = audioContext.createScriptProcessor(1024, 1, 1);
+          source.connect(processor);
+          processor.connect(audioContext.destination);
+
+          processor.onaudioprocess = (e) => {
+            if (isSpeaking) {
+              const inputData = e.inputBuffer.getChannelData(0);
+              // Here you would process the audio data and send it to the server
+              // For now, we'll just log that we're processing audio
+              console.log("Processing audio data:", inputData.length);
+            }
+          };
 
           // Create and send offer
-          console.log('Creating offer');
+          console.log("Creating offer");
           const offer = await pc.createOffer({
             offerToReceiveAudio: true,
-            offerToReceiveVideo: false
+            offerToReceiveVideo: false,
           });
           await pc.setLocalDescription(offer);
 
           try {
-            console.log('Sending offer to server');
-            const response = await fetch('/offer', {
-              method: 'POST',
+            console.log("Sending offer to server");
+            const response = await fetch("/offer", {
+              method: "POST",
               headers: {
-                'Content-Type': 'application/json'
+                "Content-Type": "application/json",
               },
               body: JSON.stringify({
-                sdp: pc.localDescription.sdp
-              })
+                sdp: pc.localDescription.sdp,
+              }),
             });
 
             if (!response.ok) {
-              throw new Error('Failed to send offer');
+              throw new Error("Failed to send offer");
             }
 
             const answer = await response.json();
-            console.log('Received answer from server');
+            console.log("Received answer from server");
             await pc.setRemoteDescription(answer);
+
+            // Handle ICE candidates from server
+            pc.onicecandidate = (event) => {
+              if (event.candidate) {
+                console.log("New ICE candidate from server:", event.candidate);
+                appendLog(
+                  "New ICE candidate from server: " + event.candidate.type
+                );
+              } else {
+                console.log("ICE candidate gathering completed");
+                appendLog("ICE candidate gathering completed");
+              }
+            };
+
+            // Add connection state change handler
+            pc.onconnectionstatechange = () => {
+              console.log("Connection state changed:", pc.connectionState);
+              appendLog("Connection state: " + pc.connectionState);
+              if (pc.connectionState === "failed") {
+                console.log("Connection failed - checking ICE candidates");
+                appendLog("Connection failed - checking ICE candidates");
+              }
+            };
+
+            // Add ICE connection state change handler
+            pc.oniceconnectionstatechange = () => {
+              console.log(
+                "ICE connection state changed:",
+                pc.iceConnectionState
+              );
+              appendLog("ICE connection state: " + pc.iceConnectionState);
+              if (pc.iceConnectionState === "failed") {
+                console.log(
+                  "ICE connection failed - checking TURN server connectivity"
+                );
+                appendLog(
+                  "ICE connection failed - checking TURN server connectivity"
+                );
+              }
+            };
+
+            // Add ICE gathering state change handler
+            pc.onicegatheringstatechange = () => {
+              console.log("ICE gathering state changed:", pc.iceGatheringState);
+              appendLog("ICE gathering state: " + pc.iceGatheringState);
+            };
           } catch (err) {
-            console.error('Error during offer/answer exchange:', err);
+            console.error("Error during offer/answer exchange:", err);
             throw err;
           }
 
-          console.log('WebRTC connection established');
-          appendLog('WebRTC connection established');
+          console.log("WebRTC connection established");
+          appendLog("WebRTC connection established");
           startButtonEl.disabled = false;
           updateStatus(true);
-        } catch (err) {
-          console.error('Error initializing WebRTC:', err);
-          appendLog('Error initializing WebRTC: ' + err.message);
+        } catch (error) {
+          console.error("Failed to initialize WebRTC");
         }
       }
 
@@ -404,15 +488,15 @@
           }
 
           // Wait for data channel to be ready with timeout
-          if (!dataChannel || dataChannel.readyState !== 'open') {
+          if (!dataChannel || dataChannel.readyState !== "open") {
             console.log("Waiting for data channel to be ready...");
             await new Promise((resolve, reject) => {
               const timeout = setTimeout(() => {
-                reject(new Error('Timeout waiting for data channel'));
+                reject(new Error("Timeout waiting for data channel"));
               }, 5000); // 5 second timeout
 
               const checkChannel = () => {
-                if (dataChannel && dataChannel.readyState === 'open') {
+                if (dataChannel && dataChannel.readyState === "open") {
                   clearTimeout(timeout);
                   resolve();
                 } else {
@@ -424,8 +508,8 @@
           }
 
           // Send start speak message through data channel
-          dataChannel.send(JSON.stringify({ type: 'start_speak' }));
-          console.log('Sent start_speak message');
+          dataChannel.send(JSON.stringify({ type: "start_speak" }));
+          console.log("Sent start_speak message");
 
           isSpeaking = true;
           isCallActive = true;
@@ -450,11 +534,11 @@
           }
 
           // Wait for data channel to be ready
-          if (!dataChannel || dataChannel.readyState !== 'open') {
+          if (!dataChannel || dataChannel.readyState !== "open") {
             console.log("Waiting for data channel to be ready...");
-            await new Promise(resolve => {
+            await new Promise((resolve) => {
               const checkChannel = () => {
-                if (dataChannel && dataChannel.readyState === 'open') {
+                if (dataChannel && dataChannel.readyState === "open") {
                   resolve();
                 } else {
                   setTimeout(checkChannel, 100);
@@ -465,8 +549,8 @@
           }
 
           // Send end speak message through data channel
-          dataChannel.send(JSON.stringify({ type: 'end_speak' }));
-          console.log('Sent end_speak message');
+          dataChannel.send(JSON.stringify({ type: "end_speak" }));
+          console.log("Sent end_speak message");
 
           isSpeaking = false;
           isCallActive = false;
@@ -502,7 +586,7 @@
       // Send message through data channel
       function sendMessage() {
         const text = textInputEl.value.trim();
-        if (text && dataChannel && dataChannel.readyState === 'open') {
+        if (text && dataChannel && dataChannel.readyState === "open") {
           dataChannel.send(text);
           appendLog("You: " + text);
           textInputEl.value = "";
@@ -604,8 +688,8 @@
         try {
           await initWebRTC();
         } catch (err) {
-          console.error('Error starting session:', err);
-          appendLog('Error starting session: ' + err.message);
+          console.error("Error starting session:", err);
+          appendLog("Error starting session: " + err.message);
         }
       });
 
