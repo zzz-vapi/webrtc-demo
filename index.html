@@ -160,12 +160,11 @@
       // WebRTC globals
       let pc; // RTCPeerConnection
       let track; // Local audio track
-      let dc; // Data channel
-      let ws; // WebSocket for signaling
       let localStream; // Local media stream
       let isCallActive = false; // Call state
       let isSpeaking = false; // Speaking state
       let speakDebounceTimer = null; // Debounce timer for speak button
+      let dataChannel; // Data channel for control messages
 
       // DOM elements
       const remoteAudioEl = document.getElementById("remoteAudio");
@@ -183,86 +182,261 @@
       const settingsButtonEl = document.getElementById("settingsButton");
       const audioInputEl = document.getElementById("audioInput");
 
-      // WebSocket connection
-      function connectWebSocket() {
-        const wsUrl = `ws://${window.location.host}/ws`;
-        console.log("Connecting to WebSocket:", wsUrl);
-        ws = new WebSocket(wsUrl);
+      // Initialize WebRTC connection
+      async function initWebRTC() {
+        try {
+          // Create peer connection
+          pc = new RTCPeerConnection({
+            iceServers: [
+              { urls: 'stun:stun.l.google.com:19302' }
+            ]
+          });
 
-        ws.onopen = () => {
-          console.log("WebSocket connection established");
-          appendLog("Connected to server");
+          // Handle ICE candidates
+          pc.onicecandidate = async (event) => {
+            if (event.candidate) {
+              try {
+                const response = await fetch('/ice-candidate', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    candidate: event.candidate.toJSON()
+                  })
+                });
+                if (!response.ok) {
+                  throw new Error('Failed to send ICE candidate');
+                }
+              } catch (err) {
+                console.error('Error sending ICE candidate:', err);
+                appendLog('Error sending ICE candidate: ' + err.message);
+              }
+            }
+          };
+
+          // Handle incoming tracks
+          pc.ontrack = (event) => {
+            console.log('Received remote track:', event.track.kind);
+            remoteAudioEl.srcObject = event.streams[0];
+          };
+
+          // Create data channel for control messages
+          dataChannel = pc.createDataChannel('control');
+          dataChannel.onopen = () => {
+            console.log('Data channel opened');
+            appendLog('Control channel opened');
+          };
+          dataChannel.onclose = () => {
+            console.log('Data channel closed');
+            appendLog('Control channel closed');
+          };
+          dataChannel.onmessage = (event) => {
+            console.log('Received message:', event.data);
+            appendLog('Server: ' + event.data);
+          };
+
+          // Get local audio stream with selected device
+          const selectedDeviceId = audioInputEl.value;
+          console.log("Selected audio device ID:", selectedDeviceId);
+
+          const constraints = {
+            audio: {
+              deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true
+            }
+          };
+          console.log("Audio constraints:", constraints);
+
+          localStream = await navigator.mediaDevices.getUserMedia(constraints);
+          [track] = localStream.getAudioTracks();
+          console.log("Local audio track created:", {
+            kind: track.kind,
+            id: track.id,
+            enabled: track.enabled,
+            muted: track.muted,
+            label: track.label,
+            deviceId: track.getSettings().deviceId
+          });
+
+          // Add local track before creating offer
+          const sender = pc.addTrack(track, localStream);
+          console.log("Added track sender:", sender.track?.kind, sender.track?.id);
+
+          // Create and send offer
+          const offer = await pc.createOffer({
+            offerToReceiveAudio: true,
+            offerToReceiveVideo: false
+          });
+          await pc.setLocalDescription(offer);
+
+          try {
+            const response = await fetch('/offer', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                sdp: pc.localDescription.sdp
+              })
+            });
+
+            if (!response.ok) {
+              throw new Error('Failed to send offer');
+            }
+
+            const answer = await response.json();
+            await pc.setRemoteDescription(answer);
+          } catch (err) {
+            console.error('Error during offer/answer exchange:', err);
+            throw err;
+          }
+
+          console.log('WebRTC connection established');
+          appendLog('WebRTC connection established');
           startButtonEl.disabled = false;
           updateStatus(true);
-        };
+        } catch (err) {
+          console.error('Error initializing WebRTC:', err);
+          appendLog('Error initializing WebRTC: ' + err.message);
+        }
+      }
 
-        ws.onclose = (event) => {
-          console.log("WebSocket disconnected:", event.code, event.reason);
-          appendLog("WebSocket disconnected");
-          startButtonEl.disabled = true;
-          updateStatus(false);
-
-          // Attempt to reconnect after 3 seconds
-          setTimeout(() => {
-            console.log("Attempting to reconnect...");
-            connectWebSocket();
-          }, 3000);
-        };
-
-        ws.onerror = (error) => {
-          console.error("WebSocket error:", error);
-          appendLog("WebSocket error occurred");
-        };
-
-        ws.onmessage = async (event) => {
-          try {
-            const message = JSON.parse(event.data);
-            console.log("Received message:", message);
-            switch (message.type) {
-              case "offer":
-                await handleOffer(message);
-                break;
-              case "answer":
-                await handleAnswer(message);
-                break;
-              case "ice-candidate":
-                await handleIceCandidate(message);
-                break;
-            }
-          } catch (err) {
-            console.error("Error handling message:", err);
-            appendLog("Error handling message: " + err.message);
+      // Start speak
+      async function startSpeak() {
+        try {
+          // Prevent duplicate events
+          if (isSpeaking) {
+            console.log("Already speaking, ignoring start speak");
+            return;
           }
-        };
-      }
 
-      // Handle incoming offer
-      async function handleOffer(message) {
-        if (pc) {
-          await pc.setRemoteDescription(new RTCSessionDescription(message));
-          const answer = await pc.createAnswer();
-          await pc.setLocalDescription(answer);
-          ws.send(
-            JSON.stringify({
-              type: "answer",
-              sdp: pc.localDescription,
-            })
-          );
+          // Send start speak message through data channel
+          if (dataChannel && dataChannel.readyState === 'open') {
+            dataChannel.send(JSON.stringify({ type: 'start_speak' }));
+            console.log('Sent start_speak message');
+          } else {
+            console.error('Data channel not ready');
+            appendLog('Error: Control channel not ready');
+            return;
+          }
+
+          isSpeaking = true;
+          isCallActive = true;
+          toggleSpeakButtons(true);
+          appendLog("Started speaking");
+        } catch (err) {
+          console.error("Error starting speak:", err);
+          appendLog("Error starting speak: " + err.message);
+          isSpeaking = false;
+          isCallActive = false;
+          toggleSpeakButtons(false);
         }
       }
 
-      // Handle incoming answer
-      async function handleAnswer(message) {
-        if (pc) {
-          await pc.setRemoteDescription(new RTCSessionDescription(message));
+      // End speak
+      async function endSpeak() {
+        try {
+          // Prevent duplicate events
+          if (!isSpeaking) {
+            console.log("Not speaking, ignoring end speak");
+            return;
+          }
+
+          // Send end speak message through data channel
+          if (dataChannel && dataChannel.readyState === 'open') {
+            dataChannel.send(JSON.stringify({ type: 'end_speak' }));
+            console.log('Sent end_speak message');
+          } else {
+            console.error('Data channel not ready');
+            appendLog('Error: Control channel not ready');
+            return;
+          }
+
+          isSpeaking = false;
+          isCallActive = false;
+          toggleSpeakButtons(false);
+          appendLog("Ended speaking");
+        } catch (err) {
+          console.error("Error ending speak:", err);
+          appendLog("Error ending speak: " + err.message);
+          isSpeaking = false;
+          isCallActive = false;
+          toggleSpeakButtons(false);
         }
       }
 
-      // Handle incoming ICE candidate
-      async function handleIceCandidate(message) {
-        if (pc) {
-          await pc.addIceCandidate(new RTCIceCandidate(message.candidate));
+      // End session
+      async function endSession() {
+        if (isSpeaking) {
+          await endSpeak();
         }
+        if (dataChannel) {
+          dataChannel.close();
+        }
+        if (pc) {
+          pc.close();
+        }
+        isSpeaking = false;
+        isCallActive = false;
+        toggleSessionButtons(false);
+        updateStatus(false);
+        appendLog("Session ended");
+      }
+
+      // Send message through data channel
+      function sendMessage() {
+        const text = textInputEl.value.trim();
+        if (text && dataChannel && dataChannel.readyState === 'open') {
+          dataChannel.send(text);
+          appendLog("You: " + text);
+          textInputEl.value = "";
+        }
+      }
+
+      // UI helpers
+      function toggleSessionButtons(isSessionActive) {
+        // Toggle between Start/End Session button
+        if (isSessionActive) {
+          startButtonEl.textContent = "🔴 End Session";
+          startButtonEl.disabled = false;
+        } else {
+          startButtonEl.textContent = "🟢 Start Session";
+          startButtonEl.disabled = false;
+        }
+      }
+
+      function toggleSpeakButtons(isSpeaking) {
+        // Toggle between Start/End Speak button
+        if (isSpeaking) {
+          startSpeakButtonEl.textContent = "⏹️ End Speak";
+          startSpeakButtonEl.disabled = false; // Ensure button is enabled when speaking
+        } else {
+          startSpeakButtonEl.textContent = "🎤 Start Speak";
+          startSpeakButtonEl.disabled = false; // Ensure button is enabled when not speaking
+        }
+      }
+
+      function updateStatus(connected) {
+        statusEl.textContent = connected ? "Connected" : "Disconnected";
+        statusEl.className = `status ${
+          connected ? "connected" : "disconnected"
+        }`;
+        // Only disable the speak button if we're not connected
+        if (!connected) {
+          startSpeakButtonEl.disabled = true;
+        }
+      }
+
+      // Append message to log
+      function appendLog(message) {
+        const logEntry = document.createElement("div");
+        logEntry.textContent = message;
+        logEntry.classList.add("log-message");
+        logEl.insertBefore(logEntry, inputContainerEl);
+        logEl.scrollTop = logEl.scrollHeight;
       }
 
       // Get available audio input devices
@@ -312,276 +486,13 @@
         }
       }
 
-      // Start WebRTC session
-      async function startSession() {
-        try {
-          // Create peer connection
-          pc = new RTCPeerConnection({
-            iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-          });
-
-          // Handle remote track
-          pc.ontrack = (e) => {
-            console.log("Received remote track:", e.track.kind, e.track.id);
-            remoteAudioEl.srcObject = e.streams[0];
-            appendLog("Remote audio track received");
-          };
-
-          // Create data channel
-          dc = pc.createDataChannel("chat");
-          setupDataChannel();
-
-          // Get local audio stream with selected device
-          const selectedDeviceId = audioInputEl.value;
-          console.log("Selected audio device ID:", selectedDeviceId);
-
-          const constraints = {
-            audio: {
-              deviceId: selectedDeviceId
-                ? { exact: selectedDeviceId }
-                : undefined,
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-            },
-          };
-          console.log("Audio constraints:", constraints);
-
-          localStream = await navigator.mediaDevices.getUserMedia(constraints);
-          [track] = localStream.getAudioTracks();
-          console.log("Local audio track created:", {
-            kind: track.kind,
-            id: track.id,
-            enabled: track.enabled,
-            muted: track.muted,
-            label: track.label,
-            deviceId: track.getSettings().deviceId,
-          });
-
-          // Add local track before creating offer
-          const sender = pc.addTrack(track, localStream);
-          console.log(
-            "Added track sender:",
-            sender.track?.kind,
-            sender.track?.id
-          );
-
-          // Create and send offer with explicit audio capabilities
-          const offer = await pc.createOffer({
-            offerToReceiveAudio: true,
-            offerToReceiveVideo: false,
-          });
-          console.log("Created offer with audio capabilities");
-
-          await pc.setLocalDescription(offer);
-          ws.send(
-            JSON.stringify({
-              type: "offer",
-              sdp: pc.localDescription,
-            })
-          );
-
-          // Handle ICE candidates
-          pc.onicecandidate = (event) => {
-            if (event.candidate) {
-              ws.send(
-                JSON.stringify({
-                  type: "ice-candidate",
-                  candidate: event.candidate,
-                })
-              );
-            }
-          };
-
-          // Handle connection state changes
-          pc.onconnectionstatechange = () => {
-            appendLog(`Connection state: ${pc.connectionState}`);
-            if (pc.connectionState === "connected") {
-              updateStatus(true);
-              startSpeakButtonEl.disabled = false;
-              toggleSessionButtons(true); // Show End Session button when connected
-            } else if (
-              pc.connectionState === "disconnected" ||
-              pc.connectionState === "failed"
-            ) {
-              updateStatus(false);
-              startSpeakButtonEl.disabled = true;
-              toggleSessionButtons(false); // Show Start Session button when disconnected
-            }
-          };
-
-          // Handle ICE connection state changes
-          pc.oniceconnectionstatechange = () => {
-            appendLog(`ICE connection state: ${pc.iceConnectionState}`);
-          };
-
-          // Handle ICE gathering state changes
-          pc.onicegatheringstatechange = () => {
-            appendLog(`ICE gathering state: ${pc.iceGatheringState}`);
-          };
-
-          appendLog("Session started");
-        } catch (err) {
-          console.error("Error starting session:", err);
-          appendLog("Error starting session: " + err.message);
-          updateStatus(false);
-          toggleSessionButtons(false);
-        }
-      }
-
-      // Setup data channel
-      function setupDataChannel() {
-        dc.onopen = () => {
-          appendLog("Data channel opened");
-        };
-
-        dc.onmessage = (event) => {
-          appendLog("Server: " + event.data);
-        };
-
-        dc.onclose = () => {
-          appendLog("Data channel closed");
-        };
-      }
-
-      // UI helpers
-      function toggleSessionButtons(isSessionActive) {
-        // Toggle between Start/End Session button
-        if (isSessionActive) {
-          startButtonEl.textContent = "🔴 End Session";
-          startButtonEl.disabled = false;
-        } else {
-          startButtonEl.textContent = "🟢 Start Session";
-          startButtonEl.disabled = false;
-        }
-      }
-
-      function toggleSpeakButtons(isSpeaking) {
-        // Toggle between Start/End Speak button
-        if (isSpeaking) {
-          startSpeakButtonEl.textContent = "⏹️ End Speak";
-          startSpeakButtonEl.disabled = false; // Ensure button is enabled when speaking
-        } else {
-          startSpeakButtonEl.textContent = "🎤 Start Speak";
-          startSpeakButtonEl.disabled = false; // Ensure button is enabled when not speaking
-        }
-      }
-
-      function updateStatus(connected) {
-        statusEl.textContent = connected ? "Connected" : "Disconnected";
-        statusEl.className = `status ${
-          connected ? "connected" : "disconnected"
-        }`;
-        // Only disable the speak button if we're not connected
-        if (!connected) {
-          startSpeakButtonEl.disabled = true;
-        }
-      }
-
-      // Append message to log
-      function appendLog(message) {
-        const logEntry = document.createElement("div");
-        logEntry.textContent = message;
-        logEntry.classList.add("log-message");
-        logEl.insertBefore(logEntry, inputContainerEl);
-        logEl.scrollTop = logEl.scrollHeight;
-      }
-
-      // Start speak
-      async function startSpeak() {
-        try {
-          // Prevent duplicate events
-          if (isSpeaking) {
-            console.log("Already speaking, ignoring start speak");
-            return;
-          }
-
-          // Send start speak message
-          if (dc && dc.readyState === "open") {
-            dc.send(JSON.stringify({ type: "start_speak" }));
-            console.log("Sent start_speak message");
-          }
-
-          isSpeaking = true;
-          isCallActive = true;
-          toggleSpeakButtons(true);
-          appendLog("Started speaking");
-        } catch (err) {
-          console.error("Error starting speak:", err);
-          appendLog("Error starting speak: " + err.message);
-          isSpeaking = false;
-          isCallActive = false;
-          toggleSpeakButtons(false);
-        }
-      }
-
-      // End speak
-      async function endSpeak() {
-        try {
-          // Prevent duplicate events
-          if (!isSpeaking) {
-            console.log("Not speaking, ignoring end speak");
-            return;
-          }
-
-          // Send end speak message immediately
-          if (dc && dc.readyState === "open") {
-            dc.send(JSON.stringify({ type: "end_speak" }));
-            console.log("Sent end_speak message");
-          }
-
-          isSpeaking = false;
-          isCallActive = false;
-          toggleSpeakButtons(false);
-          appendLog("Ended speaking");
-        } catch (err) {
-          console.error("Error ending speak:", err);
-          appendLog("Error ending speak: " + err.message);
-          isSpeaking = false;
-          isCallActive = false;
-          toggleSpeakButtons(false);
-        }
-      }
-
-      // End session
-      async function endSession() {
-        if (isSpeaking) {
-          await endSpeak();
-        }
-        if (dc) {
-          dc.close();
-        }
-        if (pc) {
-          pc.close();
-        }
-        isSpeaking = false;
-        isCallActive = false;
-        toggleSessionButtons(false);
-        updateStatus(false);
-        appendLog("Session ended");
-      }
-
-      // Send message through data channel
-      function sendMessage() {
-        const text = textInputEl.value.trim();
-        if (text && dc && dc.readyState === "open") {
-          dc.send(text);
-          appendLog("You: " + text);
-          textInputEl.value = "";
-        }
-      }
-
       // Event listeners
       startButtonEl.addEventListener("click", async () => {
-        if (pc?.connectionState === "connected") {
-          // End session
-          if (isSpeaking) {
-            await endSpeak();
-          }
-          await endSession();
-        } else {
-          // Start session
-          await startSession();
+        try {
+          await initWebRTC();
+        } catch (err) {
+          console.error('Error starting session:', err);
+          appendLog('Error starting session: ' + err.message);
         }
       });
 
@@ -616,12 +527,11 @@
           // If we're already connected, we need to restart the session
           appendLog("Changing audio input requires session restart");
           await endSession();
-          await startSession();
+          await initWebRTC();
         }
       });
 
-      // Initialize WebSocket connection and get audio inputs
-      connectWebSocket();
+      // Initialize audio inputs
       getAudioInputs();
     </script>
   </body>
